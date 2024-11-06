@@ -1,4 +1,3 @@
-import argparse
 import os
 import hydra
 from omegaconf import OmegaConf
@@ -7,43 +6,33 @@ from kinetix.environment.ued.ued import (
     make_reset_train_function_with_list_of_levels,
     make_reset_train_function_with_mutations,
 )
-from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.pcg.pcg import env_state_to_pcg_state, sample_pcg_state
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util.config import (
-    compress_log_files_after_run,
     get_video_frequency,
     init_wandb,
     normalise_config,
-    save_data_to_local_file,
     generate_params_from_config,
 )
 
 os.environ["WANDB_DISABLE_SERVICE"] = "True"
 
-from kinetix.environment.env_state import EnvParams, StaticEnvParams
 
-import re
 import sys
-import time
 from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from flax.training import orbax_utils
 from flax.training.train_state import TrainState
-from orbax.checkpoint import CheckpointManager, CheckpointManagerOptions, PyTreeCheckpointer
 
 from kinetix.models import make_network_from_config
-from kinetix.util.learning import BASE_DIR, general_eval, get_eval_levels
+from kinetix.util.learning import general_eval, get_eval_levels
 from flax.serialization import to_state_dict
 
 sys.path.append(".")
 import wandb
 from kinetix.environment.env import PixelObservations, make_kinetix_env_from_name
-from kinetix.environment.utils import permute_pcg_state
 from kinetix.environment.wrappers import (
     AutoReplayWrapper,
     AutoResetWrapper,
@@ -54,13 +43,8 @@ from kinetix.environment.wrappers import (
 )
 from kinetix.models.actor_critic import ScannedRNN
 from kinetix.util.saving import (
-    load_params,
-    load_params_from_wandb_artifact_path,
-    load_pcg_state_pickle,
     load_train_state_from_wandb_artifact_path,
     save_model_to_wandb,
-    save_params,
-    stack_list_of_pytrees,
 )
 
 

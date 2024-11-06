@@ -3,7 +3,6 @@ Based on PureJaxRL Implementation of PPO
 """
 
 import os
-import pickle
 import sys
 import time
 import typing
@@ -19,14 +18,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 from flax.training.train_state import TrainState
-from kinetix.environment.env_state import StaticEnvParams
 from kinetix.environment.ued.ued import make_reset_train_function_with_mutations, make_vmapped_filtered_level_sampler
 from kinetix.environment.ued.ued import (
     make_reset_train_function_with_list_of_levels,
     make_reset_train_function_with_mutations,
 )
-from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.pcg.pcg import sample_pcg_state
 from kinetix.util.config import (
     generate_ued_params_from_config,
     init_wandb,
@@ -52,11 +48,8 @@ from kinetix.models.actor_critic import ScannedRNN
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util.learning import general_eval, get_eval_levels
 from kinetix.util.saving import (
-    load_params_from_wandb_artifact_path,
     load_train_state_from_wandb_artifact_path,
-    load_world_state_pickle,
     save_model_to_wandb,
-    save_params_to_wandb,
 )
 
 sys.path.append("ued")

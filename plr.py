@@ -1,6 +1,4 @@
 from functools import partial
-import json
-import os
 import time
 from enum import IntEnum
 from typing import Tuple
@@ -12,7 +10,6 @@ import jax.numpy as jnp
 import numpy as np
 from omegaconf import OmegaConf
 import optax
-import orbax.checkpoint as ocp
 from flax import core, struct
 from flax.training.train_state import TrainState as BaseTrainState
 
@@ -30,10 +27,8 @@ from kinetix.environment.ued.ued import (
     make_reset_train_function_with_list_of_levels,
     make_reset_train_function_with_mutations,
 )
-from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.util.config import (
     generate_ued_params_from_config,
-    get_tags,
     get_video_frequency,
     init_wandb,
     normalise_config,
@@ -41,7 +36,7 @@ from kinetix.util.config import (
     generate_params_from_config,
     get_eval_level_groups,
 )
-from jaxued.environments.underspecified_env import EnvParams, EnvState, Observation, UnderspecifiedEnv
+from jaxued.environments.underspecified_env import EnvState
 from jaxued.level_sampler import LevelSampler
 from jaxued.utils import compute_max_returns, max_mc, positive_value_loss
 from flax.serialization import to_state_dict
@@ -49,7 +44,7 @@ from flax.serialization import to_state_dict
 import sys
 
 sys.path.append("experiments")
-from kinetix.environment.env import PixelObservations, make_kinetix_env_from_name
+from kinetix.environment.env import make_kinetix_env_from_name
 from kinetix.environment.env_state import StaticEnvParams
 from kinetix.environment.wrappers import (
     UnderspecifiedToGymnaxWrapper,
@@ -67,12 +62,8 @@ from kinetix.util.learning import (
     sample_trajectories_and_learn,
 )
 from kinetix.util.saving import (
-    load_params_from_wandb_artifact_path,
     load_train_state_from_wandb_artifact_path,
-    load_world_state_pickle,
     save_model_to_wandb,
-    save_params,
-    save_params_to_wandb,
 )
 
 
