@@ -95,6 +95,7 @@ from kinetix.render.textures import (
 from kinetix.util.saving import (
     expand_pcg_state,
     export_env_state_to_json,
+    get_pcg_state_from_json,
     load_from_json_file,
     load_pcg_state_pickle,
     load_world_state_pickle,
@@ -221,12 +222,7 @@ def new_pcg_env(static_env_params):
     if EMPTY_ENV:
         env_state = create_empty_env(static_env_params)
     else:
-        return expand_pcg_state(load_pcg_state_pickle("worlds/l/h0_angrybirds.pcg.pkl"), static_env_params)
-        myrng, _rng = jax.random.split(myrng)
-
-        env_state = sample_kinetix_level(
-            _rng, engine, env_params, static_env_params, ued_params=UEDParams(), env_size_name=config["env_size_name"]
-        )
+        return get_pcg_state_from_json("worlds/l/h0_angrybirds.json")
     return env_state_to_pcg_state(env_state)
 
 
