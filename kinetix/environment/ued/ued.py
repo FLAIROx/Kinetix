@@ -42,7 +42,7 @@ from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.utils import permute_pcg_state
 from kinetix.pcg.pcg import env_state_to_pcg_state, sample_pcg_state
 from kinetix.util.config import generate_ued_params_from_config, generate_params_from_config
-from kinetix.util.saving import load_pcg_state_pickle, load_world_state_pickle, stack_list_of_pytrees, expand_env_state
+from kinetix.util.saving import get_pcg_state_from_json, load_pcg_state_pickle, load_world_state_pickle, stack_list_of_pytrees, expand_env_state
 from flax import struct
 from kinetix.environment.env import create_empty_env
 from kinetix.util.learning import BASE_DIR, general_eval, get_eval_levels
@@ -187,7 +187,7 @@ def make_vmapped_filtered_level_sampler(
 def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, make_pcg_state=True):
     assert len(levels) > 0, "Need to provide at least one level to train on"
     if config["load_train_levels_legacy"]:
-        ls = [load_pcg_state_pickle(os.path.join(BASE_DIR, l + ".pcg.pkl")) for l in levels]
+        ls = [get_pcg_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json"))) for l in levels]
         v = stack_list_of_pytrees(ls)
     else:
         _, static_env_params = generate_params_from_config(
