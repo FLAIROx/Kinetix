@@ -30,7 +30,6 @@ from kinetix.models import make_network_from_config
 from kinetix.util.learning import general_eval, get_eval_levels
 from flax.serialization import to_state_dict
 
-sys.path.append(".")
 import wandb
 from kinetix.environment.env import PixelObservations, make_kinetix_env_from_name
 from kinetix.environment.wrappers import (
@@ -65,7 +64,7 @@ def make_train(config, env_params, static_env_params):
     env = make_kinetix_env_from_name(config["env_name"], static_env_params=static_env_params)
 
     if config["train_level_mode"] == "list":
-        reset_func = make_reset_train_function_with_list_of_levels(config, config["train_levels"], static_env_params)
+        reset_func = make_reset_train_function_with_list_of_levels(config, config["train_levels_list"], static_env_params)
     elif config["train_level_mode"] == "random":
         reset_func = make_reset_train_function_with_mutations(
             env.physics_engine, env_params, env.static_env_params, config
