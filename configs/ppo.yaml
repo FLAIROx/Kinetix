@@ -1,5 +1,5 @@
 defaults:
-  - env: symbolic
+  - env: entity
   - env_size: s
   - learning:
     - ppo-base
