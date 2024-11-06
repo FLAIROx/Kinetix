@@ -1,6 +1,6 @@
 group: "auto"
 group_auto_prefix: ""
-save_path: "checkpoints/physicsenv"
+save_path: "checkpoints/kinetix"
 use_wandb: true
 save_policy: true
 wandb_project: "kinetix-experiments"
@@ -13,5 +13,5 @@ load_only_params: true
 checkpoint_save_freq: 512
 checkpoint_human_numbers: false
 load_legacy_checkpoint: false
-load_train_levels_legacy: true
+load_train_levels_legacy: false
 economical_saving: false
