@@ -20,7 +20,7 @@
 Kinetix is a framework for reinforcement learning in a 2D rigid-body physics world, written entirely in [JAX](https://github.com/jax-ml/jax).
 Kinetix can represent a huge array of physics-based tasks within a unified framework.
 We use Kinetix to investigate the training of large, general reinforcement learning agents by procedurally generating millions of tasks for training.
-You can play with Kinetix in our [online editor](https://kinetix-env.github.io/).  Also see the JAX [physics engine](https://github.com/MichaelTMatthews/Jax2D) and [graphics library](https://github.com/FLAIROx/JaxGL) we made for Kinetix.
+You can play with Kinetix in our [online editor](https://kinetix-env.github.io/), or have a look at the JAX [physics engine](https://github.com/MichaelTMatthews/Jax2D) and [graphics library](https://github.com/FLAIROx/JaxGL) we made for Kinetix.
 
 <p align="middle">
   <img src="images/bb.gif" width="200" />
@@ -83,7 +83,7 @@ We find that the agent can zero-shot simple physics problems, but still struggle
 
 Kinetix follows the interfaces established in [gymnax](https://github.com/RobertTLange/gymnax) and [jaxued](https://github.com/DramaCow/jaxued):
 
-```commandline
+```python
 # Use default parameters
 env_params = EnvParams()
 static_env_params = StaticEnvParams()
@@ -115,7 +115,7 @@ obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_param
 
 
 # ⬇️ Installation
-To install Kinetix with a CUDA-enabled JAX backend:
+To install Kinetix with a CUDA-enabled JAX backend (tested with python3.10):
 ```commandline
 git clone https://github.com/FlairOx/Kinetix.git
 cd Kinetix
@@ -125,7 +125,7 @@ pre-commit install
 ```
 
 # 🎯 Editor
-We recommend using the [KinetixJS editor](https://kinetix-env.github.io/editor), but also provide a native (less polished) Kinetix editor.
+We recommend using the [KinetixJS editor](https://kinetix-env.github.io/gallery.html?editor=true), but also provide a native (less polished) Kinetix editor.
 
 To open this editor run the following command.
 ```commandline
@@ -134,18 +134,23 @@ python3 editor.py
 
 The controls in the editor are:
 - Move between `edit` and `play` modes using `spacebar`
-- In editor mode, the edit function is shown by the icon at the top and is changed by scrolling the mouse wheel.  For instance, by navigating to the rectangle editing function you can click to place a rectangle.
+- In `edit` mode, the type of edit is shown by the icon at the top and is changed by scrolling the mouse wheel.  For instance, by navigating to the rectangle editing function you can click to place a rectangle.
   - You can also press the number keys to cycle between modes.
 - To open handmade levels press ctrl-O and navigate to the ones in the L folder.  
 - **When playing a level use the arrow keys to control motors and the numeric keys (1, 2) to control thrusters.**
 
-# 📈 Experiment
+# 📈 Experiments
 
-To run experiments with default parameters call:
+We have three primary experiment files,
+1. [**SFL**](https://github.com/amacrutherford/sampling-for-learnability?tab=readme-ov-file): Training on levels with high learnability, this is how we trained our best general agents.
+2. **PLR** PLR/DR/ACCEL in the [JAXUED](https://github.com/DramaCow/jaxued) style.
+3. **PPO** Normal PPO in the [PureJaxRL](https://github.com/luchris429/purejaxrl/) style.
+
+To run experiments with default parameters run any of the following:
 ```commandline
 python3 sfl.py
 python3 plr.py
-python3 ppo_rnn.py
+python3 ppo.py
 ```
 
 We use [hydra](https://hydra.cc/) for managing our configs.  See the `configs/` folder for all the hydra configs that will be used by default.
@@ -157,10 +162,44 @@ python3 sfl.py model.transformer_depth=8
 
 These experiments use [wandb](https://wandb.ai/home) for logging by default.
 
+## 🏋️ Training RL Agents
+We provide several different ways to train RL agents, with the three most common options being, (a) [Training an agent on random levels](#training-on-random-levels), (b) [Training an agent on a single, hand-designed level](#training-on-a-single-hand-designed-level) or (c) [Training an agent on a set of hand-designed levels](#training-on-a-set-of-hand-designed-levels).
+
+> [!WARNING]
+> Kinetix has three different environment sizes, `s`, `m` and `l`. When running any of the scripts, you have to set the `env_size` option accordingly, for instance, `python3 ppo.py train_levels=random env_size=m` would train on random `m` levels.
+> It will give an error if you try and load large levels into a small env size, for instance `python3 ppo.py train_levels=m env_size=s` would error.
+
+### Training on random levels
+This is the default option, but we give the explicit command for completeness
+```commandline
+python3 ppo.py train_levels=random
+```
+### Training on a single hand-designed level
+
+> [!NOTE]
+> Check the `worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `worlds/` directory
+
+```commandline
+python3 ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'
+```
+### Training on a set of hand-designed levels
+```commandline
+python3 ppo.py train_levels=s env_size=s eval_env_size=s
+# python3 ppo.py train_levels=m env_size=m  eval_env_size=m
+# python3 ppo.py train_levels=l env_size=l  eval_env_size=l
+```
+
+Or, on a custom set:
+```commandline
+python3 ppo.py train_levels=l eval_env_size=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
+```
+
+
 # 🔎 See Also
 - 🌐 [Kinetix.js](https://github.com/Michael-Beukman/Kinetix.js) Kinetix reimplemented in Javascript, with a live demo [here](https://kinetix-env.github.io/gallery.html?editor=true).
 - 🍎 [Jax2D](https://github.com/MichaelTMatthews/Jax2D) The physics engine we made for Kinetix.
 - 👨‍💻 [JaxGL](https://github.com/FLAIROx/JaxGL) The graphics library we made for Kinetix.
+- 📋 [Our Paper](https://arxiv.org/abs/2410.23208) for more details and empirical results.
 
 # 📚 Citation
 Please cite Kinetix it as follows:
