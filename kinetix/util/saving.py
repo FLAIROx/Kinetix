@@ -202,6 +202,9 @@ def stack_list_of_pytrees(list_of_pytrees):
         v = jax.tree_map(lambda x, y: jnp.concatenate([x, jnp.expand_dims(y, 0)], axis=0), v, l)
     return v
 
+def get_pcg_state_from_json(json_filename) -> PCGState:
+    env_state, _, _ = load_from_json_file(json_filename)
+    return env_state_to_pcg_state(env_state)
 
 def my_load_file(filename):
     data = bz2.BZ2File(filename, "rb")
