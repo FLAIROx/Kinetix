@@ -35,6 +35,7 @@ from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.models.actor_critic import ScannedRNN
 from kinetix.util.saving import (
     expand_pcg_state,
+    get_pcg_state_from_json,
     load_pcg_state_pickle,
     load_world_state_pickle,
     stack_list_of_pytrees,
@@ -60,9 +61,7 @@ DEFAULT_EVAL_LEVELS = [
 def get_eval_levels(eval_levels, static_env_params):
     should_permute = [".permute" in l for l in eval_levels]
     eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
-    # ls = [load_pcg_state_pickle(os.path.join(BASE_DIR, l + ".pcg.pkl")) for l in eval_levels]
-    ls = [load_from_json_file(os.path.join(BASE_DIR, l + ".json"))[0] for l in eval_levels]
-    ls = [env_state_to_pcg_state(l) for l in ls]
+    ls = [get_pcg_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json"))) for l in eval_levels]
     ls = [expand_pcg_state(l, static_env_params) for l in ls]
     new_ls = []
     rng = jax.random.PRNGKey(0)
