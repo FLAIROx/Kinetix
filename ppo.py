@@ -408,6 +408,7 @@ def make_train(config, env_params, static_env_params):
                             obs_to_use = obs_vid[: idx_vid[i], i]
                             obs_to_use = np.asarray(obs_to_use).transpose(0, 3, 2, 1)[:, :, ::-1, :]
                             to_log[f"media/eval_video_{eval_name}"] = obs_to_use
+                            print("Shapes of media here", obs_to_use.shape, obs_vid.shape, idx_vid, i, eval_name) # TODO Remove
 
                     wandb.log(to_log)
 
