@@ -5,3 +5,4 @@ num_thrusters: 1
 env_size_name: s
 num_motor_bindings: 4
 num_thruster_bindings: 2
+env_size_type: predefined

@@ -17,6 +17,8 @@ import wandb
 from kinetix.environment.env_state import EnvParams, StaticEnvParams
 from collections import defaultdict
 
+from kinetix.util.saving import load_from_json_file
+
 
 def get_hash_without_seed(config):
     old_seed = config["seed"]
@@ -31,6 +33,10 @@ def get_date() -> str:
 
 
 def generate_params_from_config(config):
+    if config.get("env_size_type", "predefined") == "custom":
+        # must load env params from a file
+        _, static_env_params, env_params = load_from_json_file(os.path.join("worlds", config["custom_path"]))
+        return env_params, static_env_params
     env_params = EnvParams()
 
     static_env_params = StaticEnvParams().replace(
