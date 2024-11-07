@@ -459,7 +459,7 @@ def main(config):
 
     if config["use_wandb"]:
         if config["save_policy"]:
-            train_state = jax.tree.map(lambda x: x[0], out["runner_state"][0])
+            train_state = jax.tree.map(lambda x: x, out["runner_state"][0])
             save_model_to_wandb(train_state, config["total_timesteps"], config)
 
 
