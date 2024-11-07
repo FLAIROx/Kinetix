@@ -145,8 +145,8 @@ def make_train(config, env_params, static_env_params):
         rng, _rng = jax.random.split(rng)
         obsv, env_state = env.reset(_rng, env_params)
         init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
-
-        pixel_renderer = jax.jit(make_render_pixels(env_params, env.static_env_params))
+        render_static_env_params = env.static_env_params.replace(downscale=1)
+        pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
         pixel_render_fn = lambda x: pixel_renderer(x) / 255.0
         eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
 
@@ -372,7 +372,7 @@ def make_train(config, env_params, static_env_params):
                             (
                                 env_params.max_timesteps,
                                 config["num_eval_levels"],
-                                *PixelObservations(env_params, env.static_env_params.replace(downscale=1))
+                                *PixelObservations(env_params, render_static_env_params)
                                 .observation_space(env_params)
                                 .shape,
                             )
