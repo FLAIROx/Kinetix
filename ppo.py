@@ -408,7 +408,7 @@ def make_train(config, env_params, static_env_params):
                             obs_to_use = obs_vid[: idx_vid[i], i]
                             obs_to_use = np.asarray(obs_to_use).transpose(0, 3, 2, 1)[:, :, ::-1, :]
                             print("Shapes of media here", obs_to_use.shape, obs_vid.shape, idx_vid, i, eval_name, obs_to_use.dtype, obs_to_use.max(), obs_to_use.min()) # TODO Remove
-                            to_log[f"media/eval_video_{eval_name}"] = obs_to_use.astype(np.uint8)
+                            to_log[f"media/eval_video_{eval_name}"] = wandb.Video((obs_to_use * 255).astype(np.uint8))
 
                     wandb.log(to_log)
 
