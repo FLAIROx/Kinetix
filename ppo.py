@@ -372,7 +372,7 @@ def make_train(config, env_params, static_env_params):
                             (
                                 env_params.max_timesteps,
                                 config["num_eval_levels"],
-                                *PixelObservations(env_params, env.static_env_params)
+                                *PixelObservations(env_params, env.static_env_params.replace(downscale=1))
                                 .observation_space(env_params)
                                 .shape,
                             )
@@ -407,7 +407,6 @@ def make_train(config, env_params, static_env_params):
                         for i, eval_name in enumerate(config["eval_levels"]):
                             obs_to_use = obs_vid[: idx_vid[i], i]
                             obs_to_use = np.asarray(obs_to_use).transpose(0, 3, 2, 1)[:, :, ::-1, :]
-                            print("Shapes of media here", obs_to_use.shape, obs_vid.shape, idx_vid, i, eval_name, obs_to_use.dtype, obs_to_use.max(), obs_to_use.min()) # TODO Remove
                             to_log[f"media/eval_video_{eval_name}"] = wandb.Video((obs_to_use * 255).astype(np.uint8))
 
                     wandb.log(to_log)
