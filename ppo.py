@@ -64,7 +64,7 @@ def make_train(config, env_params, static_env_params):
     env = make_kinetix_env_from_name(config["env_name"], static_env_params=static_env_params)
 
     if config["train_level_mode"] == "list":
-        reset_func = make_reset_train_function_with_list_of_levels(config, config["train_levels_list"], static_env_params)
+        reset_func = make_reset_train_function_with_list_of_levels(config, config["train_levels_list"], static_env_params, is_loading_train_levels=True)
     elif config["train_level_mode"] == "random":
         reset_func = make_reset_train_function_with_mutations(
             env.physics_engine, env_params, env.static_env_params, config
@@ -452,7 +452,7 @@ def main(config):
 
     rng = jax.random.PRNGKey(config["seed"])
     rng, _rng = jax.random.split(rng)
-
+    print("ENV PARAMS HERE", static_env_params)
     train_jit = jax.jit(make_train(config, env_params, static_env_params))
 
     out = train_jit(_rng)

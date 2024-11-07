@@ -184,11 +184,14 @@ def make_vmapped_filtered_level_sampler(
     return reset
 
 
-def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, make_pcg_state=True):
+def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, make_pcg_state=True,
+                                                  is_loading_train_levels=False):
     assert len(levels) > 0, "Need to provide at least one level to train on"
     if config["load_train_levels_legacy"]:
         ls = [get_pcg_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json"))) for l in levels]
         v = stack_list_of_pytrees(ls)
+    elif is_loading_train_levels:
+        v = get_eval_levels(levels, static_env_params)
     else:
         _, static_env_params = generate_params_from_config(
             config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}

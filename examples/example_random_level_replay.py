@@ -43,7 +43,7 @@ def main():
     # There are a lot of wrappers
     pixels = renderer(env_state.env_state.env_state.env_state)
 
-    plt.imshow(pixels.astype(jnp.uint8))
+    plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
     plt.show()
 
 
