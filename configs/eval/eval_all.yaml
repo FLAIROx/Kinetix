@@ -68,6 +68,14 @@ eval_levels:
     "l/mjc_swimmer",
     "l/mjc_walker",
     "l/mjc_walker_easy",
+    "l/car_launch",
+    "l/car_swing_around",
+    "l/chain_lander",
+    "l/chain_thrust",
+    "l/gears",
+    "l/lever_puzzle",
+    "l/pr",
+    "l/rail",
   ]
 eval_num_attempts: 10
 eval_freq: 10

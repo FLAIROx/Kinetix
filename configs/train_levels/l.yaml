@@ -33,4 +33,12 @@ train_levels_list:
     "l/mjc_walker_easy",
     "l/grasp_hard",
     "l/grasp_easy",
+    "l/car_launch",
+    "l/car_swing_around",
+    "l/chain_lander",
+    "l/chain_thrust",
+    "l/gears",
+    "l/lever_puzzle",
+    "l/pr",
+    "l/rail",
   ]
