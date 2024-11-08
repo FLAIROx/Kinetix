@@ -13,6 +13,8 @@
         <img src="https://img.shields.io/badge/online-editor-purple" /></a>
        <a href= "https://arxiv.org/abs/2410.23208">
         <img src="https://img.shields.io/badge/arxiv-2410.23208-b31b1b" /></a>
+        <a href= "./docs/README.md">
+        <img src="https://img.shields.io/badge/docs-green" /></a>
 </p>
 
 # Kinetix

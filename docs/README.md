@@ -1,5 +1,5 @@
 # Documentation
-This is intended to provide some more details about how Kinetix works, including more in-depth examples.
+This is intended to provide some more details about how Kinetix works, including more in-depth examples. If you are interested in the configuration options, see [here](./configs.md).
 
 - [Documentation](#documentation)
   - [Different Versions of Kinetix Environments](#different-versions-of-kinetix-environments)
