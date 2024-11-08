@@ -177,7 +177,7 @@ def init_wandb(config, name) -> wandb.run:
 
 
 def save_data_to_local_file(data_to_save, config):
-    if not config["save_local_data"]:
+    if not config.get("save_local_data", False):
         return
 
     def reverse_in(li, value):
