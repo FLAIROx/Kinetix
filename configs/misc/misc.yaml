@@ -7,7 +7,6 @@ wandb_project: "kinetix-experiments"
 wandb_entity: null
 wandb_mode : online
 video_frequency: 10
-save_local_data: false
 load_from_checkpoint: null
 load_only_params: true
 checkpoint_save_freq: 512

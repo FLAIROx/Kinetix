@@ -13,7 +13,6 @@ gae_lambda: 0.9
 ent_coef: 0.01
 anneal_lr: false
 warmup_lr: false
-num_checkpoints: 1
 vf_coef: 0.5
 permute_state_during_training: false
 filter_levels: true
