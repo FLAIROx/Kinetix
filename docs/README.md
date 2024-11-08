@@ -51,8 +51,8 @@ The following two images show the main editor page, and then the level I designe
 
 
 <p align="middle">
-  <img src="images/docs/edit-1.png" width="49%" />
-  <img src="images/docs/edit-2.png" width="49%" />
+  <img src="../images/docs/edit-1.png" width="49%" />
+  <img src="../images/docs/edit-2.png" width="49%" />
 </p>
 
 ### Step 2 - Export It
@@ -73,5 +73,11 @@ You can use the above if you want to import the level and play around with it. I
 python3 ppo.py env_size=custom \
               env_size.custom_path=custom/my_custom_level.json \
               train_levels=s \
-              train_levels.train_levels_list='["custom/my_custom_level.json"]'
+              train_levels.train_levels_list='["custom/my_custom_level.json"]' \
+              eval=eval_auto
 ```
+
+And the agent will start training, with videos on this on [wandb](https://wandb.ai).
+<p align="middle">
+  <img src="../images/docs/wandb.gif" width="49%" />
+</p>
