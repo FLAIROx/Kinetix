@@ -422,7 +422,6 @@ def main(config=None):
                 )
 
         wandb.log(log_dict)
-        save_data_to_local_file(log_dict, config)
 
     def get_all_metrics(
         rng,

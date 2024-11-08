@@ -194,12 +194,9 @@ def main(config):
     else:
         raise ValueError(f"Unknown train_level_mode: {config['train_level_mode']}")
 
-    if config["buffer_train"]:
-        raise ValueError
-    else:
-        sample_random_levels = make_vmapped_filtered_level_sampler(
-            sample_random_level, env_params, static_env_params, config, make_pcg_state=False, env=env
-        )
+    sample_random_levels = make_vmapped_filtered_level_sampler(
+        sample_random_level, env_params, static_env_params, config, make_pcg_state=False, env=env
+    )
     _, eval_static_env_params = generate_params_from_config(
         config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}
     )
