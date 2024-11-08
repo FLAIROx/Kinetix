@@ -36,7 +36,9 @@ def generate_params_from_config(config):
     if config.get("env_size_type", "predefined") == "custom":
         # must load env params from a file
         _, static_env_params, env_params = load_from_json_file(os.path.join("worlds", config["custom_path"]))
-        return env_params, static_env_params
+        return env_params, static_env_params.replace(
+            frame_skip=config["frame_skip"],
+        )
     env_params = EnvParams()
 
     static_env_params = StaticEnvParams().replace(
