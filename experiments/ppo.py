@@ -442,7 +442,7 @@ def make_train(config, env_params, static_env_params):
     return train
 
 
-@hydra.main(version_base=None, config_path="./configs", config_name="ppo")
+@hydra.main(version_base=None, config_path="../configs", config_name="ppo")
 def main(config):
     config = normalise_config(OmegaConf.to_container(config), "PPO")
     env_params, static_env_params = generate_params_from_config(config)
@@ -454,7 +454,6 @@ def main(config):
 
     rng = jax.random.PRNGKey(config["seed"])
     rng, _rng = jax.random.split(rng)
-    print("ENV PARAMS HERE", static_env_params)
     train_jit = jax.jit(make_train(config, env_params, static_env_params))
 
     out = train_jit(_rng)

@@ -2641,7 +2641,7 @@ class Editor:
         return False
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="editor")
+@hydra.main(version_base=None, config_path="../configs", config_name="editor")
 def main(config):
     config = normalise_config(OmegaConf.to_container(config), "EDITOR", editor_config=True)
     env_params, static_env_params = generate_params_from_config(config)

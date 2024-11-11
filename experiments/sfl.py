@@ -157,7 +157,7 @@ def evaluate_rnn(
     return states, rewards, episode_lengths, infos
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="sfl")
+@hydra.main(version_base=None, config_path="../configs", config_name="sfl")
 def main(config):
     time_start = time.time()
     config = OmegaConf.to_container(config)
@@ -201,7 +201,6 @@ def main(config):
         config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}
     )
     eval_env = make_env(eval_static_env_params)
-    print("normal, new ", static_env_params, eval_static_env_params)
     ued_params = generate_ued_params_from_config(config)
 
     def make_render_fn(static_env_params):

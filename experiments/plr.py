@@ -256,7 +256,7 @@ def compute_all_scores(
     return main_score, (mc, pvl, learnability)
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="plr")
+@hydra.main(version_base=None, config_path="../configs", config_name="plr")
 def main(config=None):
     my_name = "PLR"
     config = OmegaConf.to_container(config)
