@@ -22,7 +22,7 @@ dependencies = [
     "distrax",
     "optax",
     "flax",
-    "numpy",
+    "numpy==1.26.4",
     "black",
     "pre-commit",
     "argparse",
@@ -46,3 +46,6 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/FLAIROx/Kinetix"
 Issues = "https://github.com/FLAIROx/Kinetix/Issues"
+
+[tool.setuptools.packages.find]
+include=["kinetix*"]
