@@ -38,7 +38,7 @@ seed: 0
 ### Env
 This controls the environment to be used.
 #### Preset Options
-We provide two options in `configs/env`, namely `entity` and `symbolic`; each of these can be used by running `python3 ppo.py env=symbolic` or `python3 ppo.py env=entity`. If you wish to customise the options further, you can add any of the following subkeys (e.g. by running `python3 ppo.py env=symbolic env.dense_reward_scale=0.0`):
+We provide two options in `configs/env`, namely `entity` and `symbolic`; each of these can be used by running `python3 experiments/ppo.py env=symbolic` or `python3 experiments/ppo.py env=entity`. If you wish to customise the options further, you can add any of the following subkeys (e.g. by running `python3 experiments/ppo.py env=symbolic env.dense_reward_scale=0.0`):
 #### Individual Subkeys
 - `env.env_name`: The name of the environment, with controls the observation and action space.
 - `env.dense_reward_scale`: How large the dense reward scale is, set this to zero to disable dense rewards.

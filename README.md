@@ -121,8 +121,7 @@ To install Kinetix with a CUDA-enabled JAX backend (tested with python3.10):
 ```commandline
 git clone https://github.com/FlairOx/Kinetix.git
 cd Kinetix
-pip install -r requirements.txt -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install git+https://github.com/DramaCow/jaxued.git@main
+pip install -e .
 pre-commit install
 ```
 
@@ -131,7 +130,7 @@ We recommend using the [KinetixJS editor](https://kinetix-env.github.io/gallery.
 
 To open this editor run the following command.
 ```commandline
-python3 editor.py
+python3 kinetix/editor.py
 ```
 
 The controls in the editor are:
@@ -150,16 +149,16 @@ We have three primary experiment files,
 
 To run experiments with default parameters run any of the following:
 ```commandline
-python3 sfl.py
-python3 plr.py
-python3 ppo.py
+python3 experiments/sfl.py
+python3 experiments/plr.py
+python3 experiments/ppo.py
 ```
 
 We use [hydra](https://hydra.cc/) for managing our configs.  See the `configs/` folder for all the hydra configs that will be used by default.
 If you want to run experiments with different configurations, you can either edit these configs or pass command line arguments as so:
 
 ```commandline
-python3 sfl.py model.transformer_depth=8
+python3 experiments/sfl.py model.transformer_depth=8
 ```
 
 These experiments use [wandb](https://wandb.ai/home) for logging by default.
@@ -168,13 +167,13 @@ These experiments use [wandb](https://wandb.ai/home) for logging by default.
 We provide several different ways to train RL agents, with the three most common options being, (a) [Training an agent on random levels](#training-on-random-levels), (b) [Training an agent on a single, hand-designed level](#training-on-a-single-hand-designed-level) or (c) [Training an agent on a set of hand-designed levels](#training-on-a-set-of-hand-designed-levels).
 
 > [!WARNING]
-> Kinetix has three different environment sizes, `s`, `m` and `l`. When running any of the scripts, you have to set the `env_size` option accordingly, for instance, `python3 ppo.py train_levels=random env_size=m` would train on random `m` levels.
-> It will give an error if you try and load large levels into a small env size, for instance `python3 ppo.py train_levels=m env_size=s` would error.
+> Kinetix has three different environment sizes, `s`, `m` and `l`. When running any of the scripts, you have to set the `env_size` option accordingly, for instance, `python3 experiments/ppo.py train_levels=random env_size=m` would train on random `m` levels.
+> It will give an error if you try and load large levels into a small env size, for instance `python3 experiments/ppo.py train_levels=m env_size=s` would error.
 
 ### Training on random levels
 This is the default option, but we give the explicit command for completeness
 ```commandline
-python3 ppo.py train_levels=random
+python3 experiments/ppo.py train_levels=random
 ```
 ### Training on a single hand-designed level
 
@@ -182,18 +181,18 @@ python3 ppo.py train_levels=random
 > Check the `worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `worlds/` directory
 
 ```commandline
-python3 ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'
+python3 experiments/ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'
 ```
 ### Training on a set of hand-designed levels
 ```commandline
-python3 ppo.py train_levels=s env_size=s eval_env_size=s
-# python3 ppo.py train_levels=m env_size=m  eval_env_size=m
-# python3 ppo.py train_levels=l env_size=l  eval_env_size=l
+python3 experiments/ppo.py train_levels=s env_size=s eval_env_size=s
+# python3 experiments/ppo.py train_levels=m env_size=m  eval_env_size=m
+# python3 experiments/ppo.py train_levels=l env_size=l  eval_env_size=l
 ```
 
 Or, on a custom set:
 ```commandline
-python3 ppo.py train_levels=l eval_env_size=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
+python3 experiments/ppo.py train_levels=l eval_env_size=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
 
 

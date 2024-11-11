@@ -70,11 +70,11 @@ level, static_env_params, env_params = load_from_json_file("worlds/custom/my_cus
 You can use the above if you want to import the level and play around with it. If you want to train an RL agent on this level, you can do the following (see [here](https://github.com/FLAIROx/Kinetix?tab=readme-ov-file#training-on-a-single-hand-designed-level) from the main README).
 
 ```commandline
-python3 ppo.py env_size=custom \
-              env_size.custom_path=custom/my_custom_level.json \
-              train_levels=s \
-              train_levels.train_levels_list='["custom/my_custom_level.json"]' \
-              eval=eval_auto
+python3 experiments/ppo.py env_size=custom \
+                           env_size.custom_path=custom/my_custom_level.json \
+                           train_levels=s \
+                           train_levels.train_levels_list='["custom/my_custom_level.json"]' \
+                           eval=eval_auto
 ```
 
 And the agent will start training, with videos on this on [wandb](https://wandb.ai).
