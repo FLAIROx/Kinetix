@@ -18,7 +18,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "jax[cuda12_pip]==0.4.26",
+    "jax[cuda12_pip]==0.4.35",
     "distrax",
     "optax",
     "flax",
@@ -39,7 +39,8 @@ dependencies = [
     "pygame_widgets",
     "jaxgl",
     "jax2d",
-    "jaxued @ git+https://github.com/DramaCow/jaxued.git@main"
+    "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
+    "moviepy==1.0.3",
 ]
 
 
