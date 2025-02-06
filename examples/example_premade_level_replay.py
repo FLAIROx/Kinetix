@@ -11,10 +11,22 @@ from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util.saving import load_from_json_file
 
+import imageio
+import os
 
 def main():
+
+    file_path = "worlds/l/grasp_easy"
+
+    # num steps 
+    i = 0
+    num_steps = 100
+    rendered_images = []
+
     # Load a premade level
-    level, static_env_params, env_params = load_from_json_file("worlds/l/grasp_easy.json")
+    level, static_env_params, env_params = load_from_json_file(f"{file_path}.json")
+    # Render environment
+    renderer = make_render_pixels(env_params, static_env_params)
 
     # Create the environment
     env = make_kinetix_env_from_args(
@@ -25,21 +37,26 @@ def main():
     rng = jax.random.PRNGKey(0)
     rng, _rng = jax.random.split(rng)
     obs, env_state = env.reset_to_level(_rng, level, env_params)
+    rendered_images.append(
+        renderer(env_state.env_state.env_state.env_state)
+    )
 
-    # Take a step in the environment
-    rng, _rng = jax.random.split(rng)
-    action = env.action_space(env_params).sample(_rng)
-    rng, _rng = jax.random.split(rng)
-    obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_params)
+    while i < num_steps:
+        # Take a step in the environment
+        rng, _rng = jax.random.split(rng)
+        action = env.action_space(env_params).sample(_rng)
+        rng, _rng = jax.random.split(rng)
+        obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_params)
 
-    # Render environment
-    renderer = make_render_pixels(env_params, static_env_params)
+        # There are a lot of wrappers
+        pixels = renderer(env_state.env_state.env_state.env_state)
+        rendered_images.append(pixels)
+        i += 1 
 
-    # There are a lot of wrappers
-    pixels = renderer(env_state.env_state.env_state.env_state)
+    imageio.mimsave(f"{file_path}.mp4", rendered_images, fps=8, format="mp4")
 
-    plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
-    plt.show()
+    #plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
+    #plt.show()
 
 
 if __name__ == "__main__":
