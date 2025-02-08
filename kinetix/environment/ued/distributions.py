@@ -123,7 +123,21 @@ def sample_kinetix_level(
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     env_size_name: str = "l",
-):
+) -> EnvState:
+    """
+    Sample a random kinetix level.
+
+    Args:
+        rng: rng
+        engine: PhysicsEngine
+        env_params: EnvParams
+        static_env_params: StaticEnvParams
+        ued_params: UEDParams
+        env_size_name: str, optional. One of "s", "m", or "l". Defaults to "l".
+
+    Returns:
+        EnvState
+    """
     rng, _rng = jax.random.split(rng)
     _rngs = jax.random.split(_rng, 12)
 
@@ -284,7 +298,21 @@ def create_random_starting_distribution(
     ued_params: UEDParams,
     env_size_name: str,
     controllable=True,
-):
+) -> EnvState:
+    """
+    Creates a random starting distribution, given the UED parameters.
+
+    Args:
+        rng: rng
+        env_params: EnvParams
+        static_env_params: StaticEnvParams
+        ued_params: UEDParams
+        env_size_name: str
+        controllable: bool
+
+    Returns:
+        EnvState
+    """
     rng, _rng = jax.random.split(rng)
     _rngs = jax.random.split(_rng, 15)
     d = to_state_dict(ued_params)
@@ -305,7 +333,7 @@ def create_random_starting_distribution(
         max_shape_size=static_env_params.max_shape_size * 1.0, goal_body_size_factor=1.0
     )
 
-    state = create_empty_env(env_params, static_env_params)
+    state = create_empty_env(static_env_params)
 
     def _get_ued_params(rng):
         rng, _rng, _rng2 = jax.random.split(rng, 3)
