@@ -55,7 +55,7 @@ from kinetix.util.saving import (
 sys.path.append("ued")
 from flax.traverse_util import flatten_dict, unflatten_dict
 from safetensors.flax import load_file, save_file
-from transformers import AutoProcessor, FlaxCLIPModel
+from transformers import FlaxCLIPModel
 
 from pprint import pprint
 
@@ -82,9 +82,9 @@ def upsample_image(image):
 
 @jax.jit
 def get_novlety_scores(
-    qd_embeds: chex.Array, 
-    num_to_save: int
-    ) -> Tuple[chex.Array, chex.Array]:
+        qd_embeds: chex.Array, 
+        num_to_save: int
+    ) -> chex.Array:
     """
     Returns indices of the most novel embeddings based on cosine distance.
     
@@ -109,7 +109,9 @@ def get_novlety_scores(
     # Novelty is inverse of similarity
     novelty_scores = 1 - most_similar
     
-    return novelty_scores
+    return novelty_scores/(
+        jnp.max(novelty_scores) + 1e-08
+    )
 
 
 class Transition(NamedTuple):
@@ -553,9 +555,11 @@ def main(config):
             top_success = top_learn = learnability = success_rates = jnp.zeros(config["num_to_save"])
         else:
             rngs = jax.random.split(rng, config["num_batches"])
-            _, (learnability, qd_embeds, success_rates, env_instances) = jax.lax.scan(
+            _, (uncertainty, qd_embeds, success_rates, env_instances) = jax.lax.scan(
                 _batch_step, None, rngs, config["num_batches"]
             )
+            uncertainty:chex.Array = uncertainty.flatten()
+            success_rates:chex.Array = success_rates.flatten()
  
             flat_env_instances = jax.tree_util.tree_map(
                 lambda x: x.reshape((-1,) + x.shape[2:]), 
@@ -566,17 +570,20 @@ def main(config):
             qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
             print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            novlety_scores = 0.5 * get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+            novlety_scores:chex.Array = 0.5 * get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
             print(f"Novelty scores shape: {novlety_scores.shape}")
-            print(f"Learnability shape: {learnability.shape}")
+            print(f"Uncertainty shape: {uncertainty.shape}")
             #TODO: why do such thing? + \
-            learnability = learnability.flatten() + novlety_scores + success_rates.flatten() * 0.001
+            learnability = uncertainty + novlety_scores + success_rates * 0.001
             
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
 
             top_1000_instances = jax.tree.map(lambda x: x.at[top_1000].get(), flat_env_instances)
             top_learn, top_instances = learnability.at[top_1000].get(), top_1000_instances
             top_success = success_rates.at[top_1000].get()
+
+            top_uncertainty = uncertainty.at[top_1000].get()
+            top_novlety = novlety_scores.at[top_1000].get()
 
         if config["put_eval_levels_in_buffer"]:
             top_instances = jax.tree.map(
@@ -586,6 +593,24 @@ def main(config):
             )
 
         log = {
+            "learnability/uncertainty_sampled_mean": uncertainty.mean(),
+            "learnability/uncertainty_sampled_median": jnp.median(uncertainty),
+            "learnability/uncertainty_sampled_min": uncertainty.min(),
+            "learnability/uncertainty_sampled_max": uncertainty.max(),
+            "learnability/uncertainty_selected_mean": top_uncertainty.mean(),
+            "learnability/uncertainty_selected_median": jnp.median(top_uncertainty),
+            "learnability/uncertainty_selected_min": top_uncertainty.min(),
+            "learnability/uncertainty_selected_max": top_uncertainty.max(),
+            
+            "learnability/novlety_sampled_mean": novlety_scores.mean(),
+            "learnability/novlety_sampled_median": jnp.median(novlety_scores),
+            "learnability/novlety_sampled_min": novlety_scores.min(),
+            "learnability/novlety_sampled_max": novlety_scores.max(),
+            "learnability/novlety_selected_mean": top_novlety.mean(),
+            "learnability/novlety_selected_median": jnp.median(top_novlety),
+            "learnability/novlety_selected_min": top_novlety.min(),
+            "learnability/novlety_selected_max": top_novlety.max(),
+
             "learnability/learnability_sampled_mean": learnability.mean(),
             "learnability/learnability_sampled_median": jnp.median(learnability),
             "learnability/learnability_sampled_min": learnability.min(),
@@ -594,14 +619,15 @@ def main(config):
             "learnability/learnability_selected_median": jnp.median(top_learn),
             "learnability/learnability_selected_min": top_learn.min(),
             "learnability/learnability_selected_max": top_learn.max(),
-            "learnability/solve_rate_sampled_mean": top_success.mean(),
-            "learnability/solve_rate_sampled_median": jnp.median(top_success),
-            "learnability/solve_rate_sampled_min": top_success.min(),
-            "learnability/solve_rate_sampled_max": top_success.max(),
-            "learnability/solve_rate_selected_mean": success_rates.mean(),
-            "learnability/solve_rate_selected_median": jnp.median(success_rates),
-            "learnability/solve_rate_selected_min": success_rates.min(),
-            "learnability/solve_rate_selected_max": success_rates.max(),
+
+            "learnability/solve_rate_sampled_mean": success_rates.mean(),
+            "learnability/solve_rate_sampled_median": jnp.median(success_rates),
+            "learnability/solve_rate_sampled_min": success_rates.min(),
+            "learnability/solve_rate_sampled_max": success_rates.max(),
+            "learnability/solve_rate_selected_mean": top_success.mean(),
+            "learnability/solve_rate_selected_median": jnp.median(top_success),
+            "learnability/solve_rate_selected_min": top_success.min(),
+            "learnability/solve_rate_selected_max": top_success.max(),
         }
 
         return top_learn, top_instances, log
