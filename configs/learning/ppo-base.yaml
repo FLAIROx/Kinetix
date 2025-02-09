@@ -15,6 +15,6 @@ anneal_lr: false
 warmup_lr: false
 vf_coef: 0.5
 permute_state_during_training: false
-filter_levels: true
+filter_levels: false
 level_filter_n_steps: 64
 level_filter_sample_ratio: 2
