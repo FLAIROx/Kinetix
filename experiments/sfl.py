@@ -566,11 +566,11 @@ def main(config):
             qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
             print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            novlety_scores = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+            novlety_scores = 0.5 * get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
             print(f"Novelty scores shape: {novlety_scores.shape}")
             print(f"Learnability shape: {learnability.shape}")
             #TODO: why do such thing? + \
-            learnability = learnability.flatten() + success_rates.flatten() * 0.001 + novlety_scores
+            learnability = learnability.flatten() + novlety_scores + success_rates.flatten() * 0.001
             
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
 
