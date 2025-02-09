@@ -55,8 +55,11 @@ from kinetix.util.saving import (
 sys.path.append("ued")
 from flax.traverse_util import flatten_dict, unflatten_dict
 from safetensors.flax import load_file, save_file
+from transformers import AutoProcessor, FlaxCLIPModel
 
 from pprint import pprint
+
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
 
 def save_params(params: typing.Dict, filename: typing.Union[str, os.PathLike]) -> None:
     flattened_dict = flatten_dict(params, sep=",")
@@ -66,6 +69,47 @@ def save_params(params: typing.Dict, filename: typing.Union[str, os.PathLike]) -
 def load_params(filename: typing.Union[str, os.PathLike]) -> typing.Dict:
     flattened_dict = load_file(filename)
     return unflatten_dict(flattened_dict, sep=",")
+
+
+@jax.jit 
+def upsample_image(image):
+    """Upsamples image from (125,125,3) to (224,224,3) using bilinear interpolation"""
+    return jax.image.resize(
+        image,
+        shape=(224, 224, 3),
+        method="bilinear",
+    )
+
+@jax.jit
+def get_novlety_scores(
+    qd_embeds: chex.Array, 
+    num_to_save: int
+    ) -> Tuple[chex.Array, chex.Array]:
+    """
+    Returns indices of the most novel embeddings based on cosine distance.
+    
+    Args:
+        qd_embeds: Array of shape (num_total_envs, embed_dim)
+        num_to_save: Number of most novel embeddings to return
+    
+    Returns:
+        Tuple of (indices of most novel embeddings, their novelty scores)
+    """
+    # Normalize embeddings for cosine similarity
+    qd_embeds_normalized = qd_embeds / jnp.linalg.norm(qd_embeds, axis=1, keepdims=True)
+    
+    # Compute pairwise cosine similarities
+    similarities = jnp.dot(qd_embeds_normalized, qd_embeds_normalized.T)
+    
+    # For each embedding, get its similarity to its most similar neighbor
+    # Exclude self-similarity by setting diagonal to -1
+    similarities = similarities.at[jnp.diag_indices_from(similarities)].set(-1)
+    most_similar = jnp.max(similarities, axis=1)
+    
+    # Novelty is inverse of similarity
+    novelty_scores = 1 - most_similar
+    
+    return novelty_scores
 
 
 class Transition(NamedTuple):
@@ -260,6 +304,29 @@ def main(config):
         params=network_params,
         tx=tx,
     )
+    qd_model = FlaxCLIPModel.from_pretrained(CLIP_MODEL_NAME)
+    qd_model.get_image_features = jax.jit(qd_model.get_image_features)
+
+    @jax.jit 
+    def _batch_get_qd_embed(array:chex.Array) -> chex.Array:
+        """
+        Computes the query-document embeddings for a batch of input arrays using the CLIP model.
+        
+        Args:
+            array (chex.Array): A batch of input images in the shape (batch_size, height, width, channels).
+            
+        Returns:
+            chex.Array: The computed embeddings with gradients stopped, typically of shape (batch_size, embedding_dim).
+        """
+        return jax.lax.stop_gradient(
+            qd_model.get_image_features(
+                pixel_values= jnp.transpose(
+                        array,
+                        (0, 3, 1, 2),
+                )
+            )            
+        )
+    
     if config["load_from_checkpoint"] != None:
         print("LOADING from", config["load_from_checkpoint"], "with only params =", config["load_only_params"])
         train_state = load_train_state_from_wandb_artifact_path(
@@ -462,6 +529,13 @@ def main(config):
                 BATCH_ACTORS,
             )
 
+            # ------- qd ------ 
+            batch_pixels = jax.vmap(render_fn)(env_instances)
+            batch_upsampled_pixels = jax.vmap(upsample_image)(batch_pixels)
+            batch_qd_embedding = _batch_get_qd_embed(batch_upsampled_pixels)
+            print("#### qd embedding shape", batch_qd_embedding.shape)
+            # ------- qd ------
+
             runner_state = (env_state, env_state, obsv, jnp.zeros((BATCH_ACTORS), dtype=bool), init_hstate, rng)
             runner_state, traj_batch = jax.lax.scan(_env_step, runner_state, None, config["rollout_steps"])
             done_by_env = traj_batch.done.reshape((-1, config["batch_size"]))
@@ -470,7 +544,7 @@ def main(config):
             o = _calc_outcomes_by_agent(config["rollout_steps"], traj_batch.done, traj_batch.reward, traj_batch.info)
             success_by_env = o["success_rate"].reshape((1, config["batch_size"]))
             learnability_by_env = (success_by_env * (1 - success_by_env)).sum(axis=0)
-            return None, (learnability_by_env, success_by_env.sum(axis=0), env_instances)
+            return None, (learnability_by_env, batch_qd_embedding, success_by_env.sum(axis=0), env_instances)
 
         if config["sampled_envs_ratio"] == 0.0:
             print("Not doing any rollouts because sampled_envs_ratio is 0.0")
@@ -479,12 +553,25 @@ def main(config):
             top_success = top_learn = learnability = success_rates = jnp.zeros(config["num_to_save"])
         else:
             rngs = jax.random.split(rng, config["num_batches"])
-            _, (learnability, success_rates, env_instances) = jax.lax.scan(
+            _, (learnability, qd_embeds, success_rates, env_instances) = jax.lax.scan(
                 _batch_step, None, rngs, config["num_batches"]
             )
+ 
+            flat_env_instances = jax.tree_util.tree_map(
+                lambda x: x.reshape((-1,) + x.shape[2:]), 
+                env_instances
+            )
+            #print(f"Flat env instances shape: {flat_env_instances.polygon.radius.shape}")
+            # flat_env_instances (#totoal number of envs (batch_size * num_batches), normal dims)
+            qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
+            print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            flat_env_instances = jax.tree_util.map(lambda x: x.reshape((-1,) + x.shape[2:]), env_instances)
-            learnability = learnability.flatten() + success_rates.flatten() * 0.001 #TODO: why do such thing? 
+            novlety_scores = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+            print(f"Novelty scores shape: {novlety_scores.shape}")
+            print(f"Learnability shape: {learnability.shape}")
+            #TODO: why do such thing? + \
+            learnability = learnability.flatten() + success_rates.flatten() * 0.001 + novlety_scores
+            
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
 
             top_1000_instances = jax.tree.map(lambda x: x.at[top_1000].get(), flat_env_instances)
