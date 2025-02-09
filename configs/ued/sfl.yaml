@@ -6,4 +6,4 @@
 
 log_learnability_before_after: false
 put_eval_levels_in_buffer: false
-save_learnability_buffer_pickle: false
+save_learnability_buffer_pickle: true

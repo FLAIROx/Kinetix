@@ -328,17 +328,19 @@ def create_random_starting_distribution(
     )
 
     prob_of_large_shapes = 0.05
-
+    # define the large shape param
     ued_params_large_shapes = ued_params.replace(
-        max_shape_size=static_env_params.max_shape_size * 1.0, goal_body_size_factor=1.0
+        max_shape_size=static_env_params.max_shape_size * 1.0, 
+        goal_body_size_factor=1.0
     )
 
     state = create_empty_env(static_env_params)
 
-    def _get_ued_params(rng):
-        rng, _rng, _rng2 = jax.random.split(rng, 3)
+    def _get_ued_params(rng) -> UEDParams:
+        """Decide whether to use ued params for large shape or not"""
+        rng, _rng, _ = jax.random.split(rng, 3)
         large_shapes = jax.random.uniform(_rng) < prob_of_large_shapes
-        params_to_use = jax.tree.map(
+        params_to_use = jax.tree_util.tree_map(
             lambda x, y: jax.lax.select(large_shapes, x, y), ued_params_large_shapes, ued_params
         )
         return params_to_use

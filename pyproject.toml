@@ -22,7 +22,6 @@ dependencies = [
     "jaxlib==0.4.35",
     "distrax",
     "optax",
-    "flax",
     "numpy==1.26.4",
     "black",
     "pre-commit",
@@ -43,6 +42,7 @@ dependencies = [
     "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
     "moviepy==1.0.3",
     "dm-tree>=0.1.8",
+    "flax==0.10.2",
 ]
 
 

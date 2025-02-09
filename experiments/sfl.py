@@ -3,11 +3,11 @@ Based on PureJaxRL Implementation of PPO
 """
 
 import os
-import sys
+import sys 
 import time
 import typing
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, Tuple, Dict
 
 import chex
 import hydra
@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 from flax.training.train_state import TrainState
-from kinetix.environment.ued.ued import make_reset_train_function_with_mutations, make_vmapped_filtered_level_sampler
 from kinetix.environment.ued.ued import (
+    make_vmapped_filtered_level_sampler,
     make_reset_train_function_with_list_of_levels,
     make_reset_train_function_with_mutations,
 )
@@ -56,6 +56,7 @@ sys.path.append("ued")
 from flax.traverse_util import flatten_dict, unflatten_dict
 from safetensors.flax import load_file, save_file
 
+from pprint import pprint
 
 def save_params(params: typing.Dict, filename: typing.Union[str, os.PathLike]) -> None:
     flattened_dict = flatten_dict(params, sep=",")
@@ -162,6 +163,9 @@ def main(config):
     time_start = time.time()
     config = OmegaConf.to_container(config)
     config = normalise_config(config, "SFL" if config["ued"]["sampled_envs_ratio"] > 0 else "SFL-DR")
+    print("###Experiment config:")
+    pprint(config, indent=2)
+
     env_params, static_env_params = generate_params_from_config(config)
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
@@ -379,7 +383,7 @@ def main(config):
     print("group indices", eval_group_indices)
 
     @jax.jit
-    def get_learnability_set(rng, network_params):
+    def get_learnability_set(rng:chex.PRNGKey, network_params):
 
         BATCH_ACTORS = config["batch_size"]
 
@@ -394,7 +398,8 @@ def main(config):
                     jax.tree.map(lambda x: x[np.newaxis, :], obs_batch),
                     last_done[np.newaxis, :],
                 )
-                hstate, pi, value = network.apply(network_params, hstate, ac_in)
+                # TODO: SHOULD I enable stop gradient? 
+                hstate, pi, value = network.apply(network_params, hstate, ac_in) 
                 action = pi.sample(seed=_rng).squeeze()
                 log_prob = pi.log_prob(action)
                 env_act = action
@@ -422,7 +427,7 @@ def main(config):
 
             @partial(jax.vmap, in_axes=(None, 1, 1, 1))
             @partial(jax.jit, static_argnums=(0,))
-            def _calc_outcomes_by_agent(max_steps: int, dones, returns, info):
+            def _calc_outcomes_by_agent(max_steps:int, dones:chex.Array, returns:chex.Array, info:Dict):
                 idxs = jnp.arange(max_steps)
 
                 @partial(jax.vmap, in_axes=(0, 0))
@@ -478,8 +483,8 @@ def main(config):
                 _batch_step, None, rngs, config["num_batches"]
             )
 
-            flat_env_instances = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), env_instances)
-            learnability = learnability.flatten() + success_rates.flatten() * 0.001
+            flat_env_instances = jax.tree_util.map(lambda x: x.reshape((-1,) + x.shape[2:]), env_instances)
+            learnability = learnability.flatten() + success_rates.flatten() * 0.001 #TODO: why do such thing? 
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
 
             top_1000_instances = jax.tree.map(lambda x: x.at[top_1000].get(), flat_env_instances)
@@ -514,7 +519,7 @@ def main(config):
 
         return top_learn, top_instances, log
 
-    def eval(rng: chex.PRNGKey, train_state: TrainState, keep_states=True):
+    def eval(rng: chex.PRNGKey, train_state: TrainState, keep_states=True) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """
         This evaluates the current policy on the set of evaluation levels specified by config["eval_levels"].
         It returns (states, cum_rewards, episode_lengths), with shapes (num_steps, num_eval_levels, ...), (num_eval_levels,), (num_eval_levels,)
@@ -612,7 +617,7 @@ def main(config):
         _, _, last_val = network.apply(train_state.params, hstate, ac_in)
         last_val = last_val.squeeze()
 
-        def _calculate_gae(traj_batch, last_val):
+        def _calculate_gae(traj_batch, last_val) -> Tuple[chex.Array, chex.Array]:
             def _get_advantages(gae_and_next_value, transition: Transition):
                 gae, next_value = gae_and_next_value
                 done, value, reward = (
@@ -787,12 +792,12 @@ def main(config):
 
         rng, _rng, _rng2 = jax.random.split(rng, 3)
         sampled_env_instances_idxs = jax.random.randint(_rng, (config["num_envs_from_sampled"],), 0, num_env_instances)
-        sampled_env_instances = jax.tree.map(lambda x: x.at[sampled_env_instances_idxs].get(), instances)
+        sampled_env_instances = jax.tree_util.tree_map(lambda x: x.at[sampled_env_instances_idxs].get(), instances)
         myrng = jax.random.split(_rng2, config["num_envs_from_sampled"])
         obsv_sampled, env_state_sampled = jax.vmap(env.reset_to_level, in_axes=(0, 0))(myrng, sampled_env_instances)
-
-        obsv = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), obsv_gen, obsv_sampled)
-        env_state = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), env_state_gen, env_state_sampled)
+        # CONCATNATE
+        obsv = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=0), obsv_gen, obsv_sampled)
+        env_state = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=0), env_state_gen, env_state_sampled)
 
         start_state = env_state
         hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
@@ -833,7 +838,7 @@ def main(config):
         return {"maps": wandb.Image(im)}
 
     @jax.jit
-    def train_and_eval_step(runner_state, eval_rng):
+    def train_and_eval_step(runner_state:tuple, eval_rng:chex.PRNGKey):
 
         learnability_rng, eval_singleton_rng, eval_sampled_rng, _rng = jax.random.split(eval_rng, 4)
         # TRAIN
@@ -845,7 +850,7 @@ def main(config):
             )
 
         print("instance size", sum(x.size for x in jax.tree_util.tree_leaves(instances)))
-
+    
         runner_state_instances = (runner_state, instances)
         runner_state_instances, metrics = jax.lax.scan(train_step, runner_state_instances, None, config["eval_freq"])
 
@@ -868,6 +873,7 @@ def main(config):
         )
         eval_solves = eval_solves.mean(axis=0)
         # just grab the first run
+        # TODO: only the first env is used for logging
         states, episode_lengths = jax.tree_util.tree_map(
             lambda x: x[0], (states, episode_lengths)
         )  # (num_steps, num_eval_levels, ...), (num_eval_levels,)
@@ -903,11 +909,10 @@ def main(config):
         test_metrics["eval/mean_eval_solve_rate_sampled"] = eval_dr_solves
         test_metrics["eval/mean_eval_eplen_sampled"] = eval_dr_eplen
 
-        # Collect Metrics
+        # Collect Metrics (only on hand-crafted levels)
         eval_returns = cum_rewards.mean(axis=0)  # (num_eval_levels,)
 
         log_dict = {}
-
         log_dict["to_remove"] = {
             "eval_return": eval_returns,
             "eval_solve_rate": eval_solves,
@@ -1062,6 +1067,4 @@ def main(config):
 
 
 if __name__ == "__main__":
-    # with jax.disable_jit():
-    #     main()
     main()

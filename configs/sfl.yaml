@@ -2,12 +2,12 @@ defaults:
   - env: entity
   - learning: 
     - ppo-base
-    - ppo-rnn
+    - ppo-sfl
   - misc: misc
   - ued: sfl
-  - env_size: s
-  - eval: s
-  - eval_env_size: s
+  - env_size: m
+  - eval: m
+  - eval_env_size: m
   - train_levels: random
   - model: 
     - model-base
@@ -16,6 +16,4 @@ defaults:
 
 eval:
   eval_freq: 128
-learning:
-  num_steps: 256
 seed: 0

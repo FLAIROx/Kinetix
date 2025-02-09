@@ -94,6 +94,7 @@ def get_eval_level_groups(eval_levels: List[str]) -> List[Tuple[str, str]]:
 def normalise_config(config, name, editor_config=False):
     old_config = copy.deepcopy(config)
     keys = ["env", "learning", "model", "misc", "eval", "ued", "env_size", "train_levels"]
+    # flatten config
     for k in keys:
         if k not in config:
             config[k] = {}
@@ -159,7 +160,7 @@ def get_tags(config, name):
     return tags
 
 
-def init_wandb(config, name) -> wandb.run:
+def init_wandb(config, name):
     run = wandb.init(
         config=config,
         project=config["wandb_project"],
