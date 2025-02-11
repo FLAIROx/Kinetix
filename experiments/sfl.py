@@ -558,7 +558,7 @@ def main(config):
             _, (uncertainty, qd_embeds, success_rates, env_instances) = jax.lax.scan(
                 _batch_step, None, rngs, config["num_batches"]
             )
-            uncertainty:chex.Array = uncertainty.flatten()
+            uncertainty:chex.Array = 4 * uncertainty.flatten()
             success_rates:chex.Array = success_rates.flatten()
  
             flat_env_instances = jax.tree_util.tree_map(
@@ -570,11 +570,11 @@ def main(config):
             qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
             print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            novlety_scores:chex.Array = 0.5 * get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+            novlety_scores:chex.Array = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
             print(f"Novelty scores shape: {novlety_scores.shape}")
             print(f"Uncertainty shape: {uncertainty.shape}")
             #TODO: why do such thing? + \
-            learnability = uncertainty + novlety_scores + success_rates * 0.001
+            learnability = (uncertainty + novlety_scores)/2 + success_rates * 0.001
             
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
 
