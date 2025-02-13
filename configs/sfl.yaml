@@ -17,3 +17,4 @@ defaults:
 eval:
   eval_freq: 128
 seed: 0
+use_diversity: true

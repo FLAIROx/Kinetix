@@ -18,8 +18,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "jax==0.4.35",
-    "jaxlib==0.4.35",
+    "jax[cuda12_pip]==0.4.35",
+    "jaxlib",
     "distrax",
     "optax",
     "numpy==1.26.4",
