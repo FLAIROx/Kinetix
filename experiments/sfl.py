@@ -95,6 +95,7 @@ def get_novlety_scores(
     Returns:
         Tuple of (indices of most novel embeddings, their novelty scores)
     """
+    # cosine similarity
     # Normalize embeddings for cosine similarity
     qd_embeds_normalized = qd_embeds / jnp.linalg.norm(qd_embeds, axis=1, keepdims=True)
     
@@ -558,26 +559,32 @@ def main(config):
             _, (uncertainty, qd_embeds, success_rates, env_instances) = jax.lax.scan(
                 _batch_step, None, rngs, config["num_batches"]
             )
-            uncertainty:chex.Array = 4 * uncertainty.flatten()
+            uncertainty:chex.Array = uncertainty.flatten()
             success_rates:chex.Array = success_rates.flatten()
  
             flat_env_instances = jax.tree_util.tree_map(
                 lambda x: x.reshape((-1,) + x.shape[2:]), 
                 env_instances
             )
-            #print(f"Flat env instances shape: {flat_env_instances.polygon.radius.shape}")
-            # flat_env_instances (#totoal number of envs (batch_size * num_batches), normal dims)
-            qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
-            print(f"QD embeds shape: {qd_embeds_flatten.shape}")
+            if config["use_diversity"]:
+                #print(f"Flat env instances shape: {flat_env_instances.polygon.radius.shape}")
+                # flat_env_instances (#totoal number of envs (batch_size * num_batches), normal dims)
+                qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
+                print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            novlety_scores:chex.Array = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
-            print(f"Novelty scores shape: {novlety_scores.shape}")
-            print(f"Uncertainty shape: {uncertainty.shape}")
-            #TODO: why do such thing? + \
-            learnability = (uncertainty + novlety_scores)/2 + success_rates * 0.001
+                novlety_scores:chex.Array = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+                print(f"Novelty scores shape: {novlety_scores.shape}")
+                print(f"Uncertainty shape: {uncertainty.shape}")
+                #TODO: why do such thing? + \
+                learnability = (4*uncertainty + novlety_scores)/2 + success_rates * 0.001
+                # uncertainy = p(1-p) p = solved rate 
+                # n_sample = 12288
+                # learnability = (a * b)/(a+b)
+            else:
+                novlety_scores = jnp.zeros_like(uncertainty, dtype=jnp.float32)
+                learnability = uncertainty + success_rates * 0.001
             
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
-
             top_1000_instances = jax.tree.map(lambda x: x.at[top_1000].get(), flat_env_instances)
             top_learn, top_instances = learnability.at[top_1000].get(), top_1000_instances
             top_success = success_rates.at[top_1000].get()
