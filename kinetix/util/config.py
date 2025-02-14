@@ -94,6 +94,7 @@ def get_eval_level_groups(eval_levels: List[str]) -> List[Tuple[str, str]]:
 def normalise_config(config, name, editor_config=False):
     old_config = copy.deepcopy(config)
     keys = ["env", "learning", "model", "misc", "eval", "ued", "env_size", "train_levels"]
+    # flatten config
     for k in keys:
         if k not in config:
             config[k] = {}
@@ -140,7 +141,7 @@ def normalise_config(config, name, editor_config=False):
             nsteps = nsteps // 1000
             letter = "B"
         config["run_name"] = (
-            config["env_name"] + f"-{name}-" + str(nsteps) + letter + "-" + str(config["num_train_envs"])
+            config["env_name"] + f"-{name}-" + str(nsteps) + letter + "-" + str(config["num_train_envs"]) + f"-seed{config['seed']}" + f"-use-diversity{config['use_diversity']}"
         )
 
         if config["checkpoint_save_freq"] >= config["num_updates"]:
@@ -159,7 +160,7 @@ def get_tags(config, name):
     return tags
 
 
-def init_wandb(config, name) -> wandb.run:
+def init_wandb(config, name):
     run = wandb.init(
         config=config,
         project=config["wandb_project"],

@@ -1,7 +1,7 @@
 from functools import partial
 import time
 from enum import IntEnum
-from typing import Tuple
+from typing import Tuple, Callable
 
 import chex
 import hydra
@@ -492,14 +492,14 @@ def main(config=None):
 
     if config["use_accel"] and config["accel_start_from_empty"]:
 
-        def make_sample_random_level():
-            def inner(rng):
-                def _inner_accel(rng):
+        def make_sample_random_level() -> Callable:
+            def inner(rng) -> EnvState:
+                def _inner_accel(rng) -> EnvState:
                     return create_random_starting_distribution(
                         rng, env_params, static_env_params, ued_params, config["env_size_name"], controllable=True
                     )
 
-                def _inner_accel_not_controllable(rng):
+                def _inner_accel_not_controllable(rng) -> EnvState:
                     return create_random_starting_distribution(
                         rng, env_params, static_env_params, ued_params, config["env_size_name"], controllable=False
                     )

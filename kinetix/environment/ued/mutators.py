@@ -44,11 +44,11 @@ def mutate_add_shape(
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_no_fixate: bool = False,
-):
-    def do_dummy(rng, state):
+) -> EnvState:
+    def do_dummy(rng, state) -> EnvState:
         return state
 
-    def do_add(rng, state):
+    def do_add(rng, state) -> EnvState:
         rng, _rng = jax.random.split(rng)
         _rngs = jax.random.split(_rng, 9)
 
@@ -204,7 +204,7 @@ def mutate_add_connected_shape(
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_rjoint: bool = False,
-):
+) -> EnvState:
     def do_dummy(rng, state):
         return state, False
 
@@ -610,14 +610,18 @@ def mutate_add_connected_shape_proper(
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_rjoint: bool = False,
-):
+) -> EnvState:
     return mutate_add_connected_shape(rng, state, params, static_env_params, ued_params, force_rjoint=force_rjoint)[0]
 
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_remove_shape(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
-):
+    rng, 
+    state: EnvState, 
+    params: EnvParams, 
+    static_env_params: StaticEnvParams, 
+    ued_params: UEDParams
+) -> EnvState:
 
     can_remove_mask = (
         jnp.concatenate([state.polygon.active, state.circle.active])
@@ -666,7 +670,11 @@ def mutate_remove_shape(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_remove_joint(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, 
+    state: EnvState, 
+    params: EnvParams, 
+    static_env_params: StaticEnvParams, 
+    ued_params: UEDParams,
 ):
     can_remove_mask = state.joint.active
 

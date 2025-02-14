@@ -3,11 +3,11 @@ Based on PureJaxRL Implementation of PPO
 """
 
 import os
-import sys
+import sys 
 import time
 import typing
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, Tuple, Dict
 
 import chex
 import hydra
@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 from flax.training.train_state import TrainState
-from kinetix.environment.ued.ued import make_reset_train_function_with_mutations, make_vmapped_filtered_level_sampler
 from kinetix.environment.ued.ued import (
+    make_vmapped_filtered_level_sampler,
     make_reset_train_function_with_list_of_levels,
     make_reset_train_function_with_mutations,
 )
@@ -55,7 +55,11 @@ from kinetix.util.saving import (
 sys.path.append("ued")
 from flax.traverse_util import flatten_dict, unflatten_dict
 from safetensors.flax import load_file, save_file
+from transformers import FlaxCLIPModel
 
+from pprint import pprint
+
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
 
 def save_params(params: typing.Dict, filename: typing.Union[str, os.PathLike]) -> None:
     flattened_dict = flatten_dict(params, sep=",")
@@ -65,6 +69,50 @@ def save_params(params: typing.Dict, filename: typing.Union[str, os.PathLike]) -
 def load_params(filename: typing.Union[str, os.PathLike]) -> typing.Dict:
     flattened_dict = load_file(filename)
     return unflatten_dict(flattened_dict, sep=",")
+
+
+@jax.jit 
+def upsample_image(image):
+    """Upsamples image from (125,125,3) to (224,224,3) using bilinear interpolation"""
+    return jax.image.resize(
+        image,
+        shape=(224, 224, 3),
+        method="bilinear",
+    )
+
+@jax.jit
+def get_novlety_scores(
+        qd_embeds: chex.Array, 
+        num_to_save: int
+    ) -> chex.Array:
+    """
+    Returns indices of the most novel embeddings based on cosine distance.
+    
+    Args:
+        qd_embeds: Array of shape (num_total_envs, embed_dim)
+        num_to_save: Number of most novel embeddings to return
+    
+    Returns:
+        Tuple of (indices of most novel embeddings, their novelty scores)
+    """
+    # cosine similarity
+    # Normalize embeddings for cosine similarity
+    qd_embeds_normalized = qd_embeds / jnp.linalg.norm(qd_embeds, axis=1, keepdims=True)
+    
+    # Compute pairwise cosine similarities
+    similarities = jnp.dot(qd_embeds_normalized, qd_embeds_normalized.T)
+    
+    # For each embedding, get its similarity to its most similar neighbor
+    # Exclude self-similarity by setting diagonal to -1
+    similarities = similarities.at[jnp.diag_indices_from(similarities)].set(-1)
+    most_similar = jnp.max(similarities, axis=1)
+    
+    # Novelty is inverse of similarity
+    novelty_scores = 1 - most_similar
+    
+    return novelty_scores/(
+        jnp.max(novelty_scores) + 1e-08
+    )
 
 
 class Transition(NamedTuple):
@@ -162,6 +210,9 @@ def main(config):
     time_start = time.time()
     config = OmegaConf.to_container(config)
     config = normalise_config(config, "SFL" if config["ued"]["sampled_envs_ratio"] > 0 else "SFL-DR")
+    print("###Experiment config:")
+    pprint(config, indent=2)
+
     env_params, static_env_params = generate_params_from_config(config)
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
@@ -256,6 +307,29 @@ def main(config):
         params=network_params,
         tx=tx,
     )
+    qd_model = FlaxCLIPModel.from_pretrained(CLIP_MODEL_NAME)
+    qd_model.get_image_features = jax.jit(qd_model.get_image_features)
+
+    @jax.jit 
+    def _batch_get_qd_embed(array:chex.Array) -> chex.Array:
+        """
+        Computes the query-document embeddings for a batch of input arrays using the CLIP model.
+        
+        Args:
+            array (chex.Array): A batch of input images in the shape (batch_size, height, width, channels).
+            
+        Returns:
+            chex.Array: The computed embeddings with gradients stopped, typically of shape (batch_size, embedding_dim).
+        """
+        return jax.lax.stop_gradient(
+            qd_model.get_image_features(
+                pixel_values= jnp.transpose(
+                        array,
+                        (0, 3, 1, 2),
+                )
+            )            
+        )
+    
     if config["load_from_checkpoint"] != None:
         print("LOADING from", config["load_from_checkpoint"], "with only params =", config["load_only_params"])
         train_state = load_train_state_from_wandb_artifact_path(
@@ -379,7 +453,7 @@ def main(config):
     print("group indices", eval_group_indices)
 
     @jax.jit
-    def get_learnability_set(rng, network_params):
+    def get_learnability_set(rng:chex.PRNGKey, network_params):
 
         BATCH_ACTORS = config["batch_size"]
 
@@ -394,7 +468,8 @@ def main(config):
                     jax.tree.map(lambda x: x[np.newaxis, :], obs_batch),
                     last_done[np.newaxis, :],
                 )
-                hstate, pi, value = network.apply(network_params, hstate, ac_in)
+                # TODO: SHOULD I enable stop gradient? 
+                hstate, pi, value = network.apply(network_params, hstate, ac_in) 
                 action = pi.sample(seed=_rng).squeeze()
                 log_prob = pi.log_prob(action)
                 env_act = action
@@ -422,7 +497,7 @@ def main(config):
 
             @partial(jax.vmap, in_axes=(None, 1, 1, 1))
             @partial(jax.jit, static_argnums=(0,))
-            def _calc_outcomes_by_agent(max_steps: int, dones, returns, info):
+            def _calc_outcomes_by_agent(max_steps:int, dones:chex.Array, returns:chex.Array, info:Dict):
                 idxs = jnp.arange(max_steps)
 
                 @partial(jax.vmap, in_axes=(0, 0))
@@ -457,6 +532,13 @@ def main(config):
                 BATCH_ACTORS,
             )
 
+            # ------- qd ------ 
+            batch_pixels = jax.vmap(render_fn)(env_instances)
+            batch_upsampled_pixels = jax.vmap(upsample_image)(batch_pixels)
+            batch_qd_embedding = _batch_get_qd_embed(batch_upsampled_pixels)
+            print("#### qd embedding shape", batch_qd_embedding.shape)
+            # ------- qd ------
+
             runner_state = (env_state, env_state, obsv, jnp.zeros((BATCH_ACTORS), dtype=bool), init_hstate, rng)
             runner_state, traj_batch = jax.lax.scan(_env_step, runner_state, None, config["rollout_steps"])
             done_by_env = traj_batch.done.reshape((-1, config["batch_size"]))
@@ -465,7 +547,7 @@ def main(config):
             o = _calc_outcomes_by_agent(config["rollout_steps"], traj_batch.done, traj_batch.reward, traj_batch.info)
             success_by_env = o["success_rate"].reshape((1, config["batch_size"]))
             learnability_by_env = (success_by_env * (1 - success_by_env)).sum(axis=0)
-            return None, (learnability_by_env, success_by_env.sum(axis=0), env_instances)
+            return None, (learnability_by_env, batch_qd_embedding, success_by_env.sum(axis=0), env_instances)
 
         if config["sampled_envs_ratio"] == 0.0:
             print("Not doing any rollouts because sampled_envs_ratio is 0.0")
@@ -474,17 +556,41 @@ def main(config):
             top_success = top_learn = learnability = success_rates = jnp.zeros(config["num_to_save"])
         else:
             rngs = jax.random.split(rng, config["num_batches"])
-            _, (learnability, success_rates, env_instances) = jax.lax.scan(
+            _, (uncertainty, qd_embeds, success_rates, env_instances) = jax.lax.scan(
                 _batch_step, None, rngs, config["num_batches"]
             )
+            uncertainty:chex.Array = uncertainty.flatten()
+            success_rates:chex.Array = success_rates.flatten()
+ 
+            flat_env_instances = jax.tree_util.tree_map(
+                lambda x: x.reshape((-1,) + x.shape[2:]), 
+                env_instances
+            )
+            if config["use_diversity"]:
+                #print(f"Flat env instances shape: {flat_env_instances.polygon.radius.shape}")
+                # flat_env_instances (#totoal number of envs (batch_size * num_batches), normal dims)
+                qd_embeds_flatten = qd_embeds.reshape(-1, qd_embeds.shape[-1])
+                print(f"QD embeds shape: {qd_embeds_flatten.shape}")
 
-            flat_env_instances = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), env_instances)
-            learnability = learnability.flatten() + success_rates.flatten() * 0.001
+                novlety_scores:chex.Array = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
+                print(f"Novelty scores shape: {novlety_scores.shape}")
+                print(f"Uncertainty shape: {uncertainty.shape}")
+                #TODO: why do such thing? + \
+                learnability = (4*uncertainty + novlety_scores)/2 + success_rates * 0.001
+                # uncertainy = p(1-p) p = solved rate 
+                # n_sample = 12288
+                # learnability = (a * b)/(a+b)
+            else:
+                novlety_scores = jnp.zeros_like(uncertainty, dtype=jnp.float32)
+                learnability = uncertainty + success_rates * 0.001
+            
             top_1000 = jnp.argsort(learnability)[-config["num_to_save"] :]
-
             top_1000_instances = jax.tree.map(lambda x: x.at[top_1000].get(), flat_env_instances)
             top_learn, top_instances = learnability.at[top_1000].get(), top_1000_instances
             top_success = success_rates.at[top_1000].get()
+
+            top_uncertainty = uncertainty.at[top_1000].get()
+            top_novlety = novlety_scores.at[top_1000].get()
 
         if config["put_eval_levels_in_buffer"]:
             top_instances = jax.tree.map(
@@ -494,6 +600,24 @@ def main(config):
             )
 
         log = {
+            "learnability/uncertainty_sampled_mean": uncertainty.mean(),
+            "learnability/uncertainty_sampled_median": jnp.median(uncertainty),
+            "learnability/uncertainty_sampled_min": uncertainty.min(),
+            "learnability/uncertainty_sampled_max": uncertainty.max(),
+            "learnability/uncertainty_selected_mean": top_uncertainty.mean(),
+            "learnability/uncertainty_selected_median": jnp.median(top_uncertainty),
+            "learnability/uncertainty_selected_min": top_uncertainty.min(),
+            "learnability/uncertainty_selected_max": top_uncertainty.max(),
+            
+            "learnability/novlety_sampled_mean": novlety_scores.mean(),
+            "learnability/novlety_sampled_median": jnp.median(novlety_scores),
+            "learnability/novlety_sampled_min": novlety_scores.min(),
+            "learnability/novlety_sampled_max": novlety_scores.max(),
+            "learnability/novlety_selected_mean": top_novlety.mean(),
+            "learnability/novlety_selected_median": jnp.median(top_novlety),
+            "learnability/novlety_selected_min": top_novlety.min(),
+            "learnability/novlety_selected_max": top_novlety.max(),
+
             "learnability/learnability_sampled_mean": learnability.mean(),
             "learnability/learnability_sampled_median": jnp.median(learnability),
             "learnability/learnability_sampled_min": learnability.min(),
@@ -502,19 +626,20 @@ def main(config):
             "learnability/learnability_selected_median": jnp.median(top_learn),
             "learnability/learnability_selected_min": top_learn.min(),
             "learnability/learnability_selected_max": top_learn.max(),
-            "learnability/solve_rate_sampled_mean": top_success.mean(),
-            "learnability/solve_rate_sampled_median": jnp.median(top_success),
-            "learnability/solve_rate_sampled_min": top_success.min(),
-            "learnability/solve_rate_sampled_max": top_success.max(),
-            "learnability/solve_rate_selected_mean": success_rates.mean(),
-            "learnability/solve_rate_selected_median": jnp.median(success_rates),
-            "learnability/solve_rate_selected_min": success_rates.min(),
-            "learnability/solve_rate_selected_max": success_rates.max(),
+
+            "learnability/solve_rate_sampled_mean": success_rates.mean(),
+            "learnability/solve_rate_sampled_median": jnp.median(success_rates),
+            "learnability/solve_rate_sampled_min": success_rates.min(),
+            "learnability/solve_rate_sampled_max": success_rates.max(),
+            "learnability/solve_rate_selected_mean": top_success.mean(),
+            "learnability/solve_rate_selected_median": jnp.median(top_success),
+            "learnability/solve_rate_selected_min": top_success.min(),
+            "learnability/solve_rate_selected_max": top_success.max(),
         }
 
         return top_learn, top_instances, log
 
-    def eval(rng: chex.PRNGKey, train_state: TrainState, keep_states=True):
+    def eval(rng: chex.PRNGKey, train_state: TrainState, keep_states=True) -> Tuple[chex.Array, chex.Array, chex.Array]:
         """
         This evaluates the current policy on the set of evaluation levels specified by config["eval_levels"].
         It returns (states, cum_rewards, episode_lengths), with shapes (num_steps, num_eval_levels, ...), (num_eval_levels,), (num_eval_levels,)
@@ -612,7 +737,7 @@ def main(config):
         _, _, last_val = network.apply(train_state.params, hstate, ac_in)
         last_val = last_val.squeeze()
 
-        def _calculate_gae(traj_batch, last_val):
+        def _calculate_gae(traj_batch, last_val) -> Tuple[chex.Array, chex.Array]:
             def _get_advantages(gae_and_next_value, transition: Transition):
                 gae, next_value = gae_and_next_value
                 done, value, reward = (
@@ -787,12 +912,12 @@ def main(config):
 
         rng, _rng, _rng2 = jax.random.split(rng, 3)
         sampled_env_instances_idxs = jax.random.randint(_rng, (config["num_envs_from_sampled"],), 0, num_env_instances)
-        sampled_env_instances = jax.tree.map(lambda x: x.at[sampled_env_instances_idxs].get(), instances)
+        sampled_env_instances = jax.tree_util.tree_map(lambda x: x.at[sampled_env_instances_idxs].get(), instances)
         myrng = jax.random.split(_rng2, config["num_envs_from_sampled"])
         obsv_sampled, env_state_sampled = jax.vmap(env.reset_to_level, in_axes=(0, 0))(myrng, sampled_env_instances)
-
-        obsv = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), obsv_gen, obsv_sampled)
-        env_state = jax.tree.map(lambda x, y: jnp.concatenate([x, y], axis=0), env_state_gen, env_state_sampled)
+        # CONCATNATE
+        obsv = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=0), obsv_gen, obsv_sampled)
+        env_state = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=0), env_state_gen, env_state_sampled)
 
         start_state = env_state
         hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
@@ -833,7 +958,7 @@ def main(config):
         return {"maps": wandb.Image(im)}
 
     @jax.jit
-    def train_and_eval_step(runner_state, eval_rng):
+    def train_and_eval_step(runner_state:tuple, eval_rng:chex.PRNGKey):
 
         learnability_rng, eval_singleton_rng, eval_sampled_rng, _rng = jax.random.split(eval_rng, 4)
         # TRAIN
@@ -845,7 +970,7 @@ def main(config):
             )
 
         print("instance size", sum(x.size for x in jax.tree_util.tree_leaves(instances)))
-
+    
         runner_state_instances = (runner_state, instances)
         runner_state_instances, metrics = jax.lax.scan(train_step, runner_state_instances, None, config["eval_freq"])
 
@@ -868,6 +993,7 @@ def main(config):
         )
         eval_solves = eval_solves.mean(axis=0)
         # just grab the first run
+        # TODO: only the first env is used for logging
         states, episode_lengths = jax.tree_util.tree_map(
             lambda x: x[0], (states, episode_lengths)
         )  # (num_steps, num_eval_levels, ...), (num_eval_levels,)
@@ -903,11 +1029,10 @@ def main(config):
         test_metrics["eval/mean_eval_solve_rate_sampled"] = eval_dr_solves
         test_metrics["eval/mean_eval_eplen_sampled"] = eval_dr_eplen
 
-        # Collect Metrics
+        # Collect Metrics (only on hand-crafted levels)
         eval_returns = cum_rewards.mean(axis=0)  # (num_eval_levels,)
 
         log_dict = {}
-
         log_dict["to_remove"] = {
             "eval_return": eval_returns,
             "eval_solve_rate": eval_solves,
@@ -1062,6 +1187,4 @@ def main(config):
 
 
 if __name__ == "__main__":
-    # with jax.disable_jit():
-    #     main()
     main()

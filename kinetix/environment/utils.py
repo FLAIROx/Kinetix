@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from kinetix.pcg.pcg_state import PCGState
 
 
-def permute_state(rng: chex.PRNGKey, env_state: EnvState, static_env_params: StaticEnvParams):
+def permute_state(rng: chex.PRNGKey, env_state: EnvState, static_env_params: StaticEnvParams) -> EnvState:
     idxs_circles = jnp.arange(static_env_params.num_circles)
     idxs_polygons = jnp.arange(static_env_params.num_polygons)
     idxs_joints = jnp.arange(static_env_params.num_joints)

@@ -192,3 +192,6 @@ log*_*
 kinetix/analysis/test*.py
 slurm-*.out
 results/
+
+Makefile 
+*.mp4

@@ -11,7 +11,7 @@ authors = [
 ]
 description = "An open-ended space of 2D physics-based RL environments"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8,<3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -19,9 +19,9 @@ classifiers = [
 ]
 dependencies = [
     "jax[cuda12_pip]==0.4.35",
+    "jaxlib",
     "distrax",
     "optax",
-    "flax",
     "numpy==1.26.4",
     "black",
     "pre-commit",
@@ -41,6 +41,8 @@ dependencies = [
     "jax2d==1.0.0",
     "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
     "moviepy==1.0.3",
+    "dm-tree>=0.1.8",
+    "flax==0.10.2",
 ]
 
 

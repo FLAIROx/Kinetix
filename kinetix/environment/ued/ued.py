@@ -1,6 +1,7 @@
 from functools import partial
 import math
 import os
+from typing import Dict, Callable
 
 import chex
 import jax
@@ -48,11 +49,21 @@ from kinetix.environment.env import create_empty_env
 from kinetix.util.learning import BASE_DIR, general_eval, get_eval_levels
 
 
-def make_mutate_env(static_env_params: StaticEnvParams, params: EnvParams, ued_params: UEDParams):
+def make_mutate_env(static_env_params: StaticEnvParams, params: EnvParams, ued_params: UEDParams) -> Callable:
+    """Mutate levels through randomly sampling a sequence of ACCEL editors 
+
+    Args:
+        static_env_params (StaticEnvParams): _description_
+        params (EnvParams): _description_
+        ued_params (UEDParams): _description_
+
+    Returns:
+        Callable: _description_
+    """
     mutate_size = make_mutate_change_shape_size(params, static_env_params)
     mutate_rot = make_mutate_change_shape_rotation(params, static_env_params)
 
-    def mutate_level(rng, level: EnvState, n=1):
+    def mutate_level(rng, level: EnvState, n=1) -> EnvState:
         def inner(carry: tuple[chex.PRNGKey, EnvState], _):
             rng, level = carry
             rng, _rng, _rng2 = jax.random.split(rng, 3)
@@ -114,7 +125,12 @@ def make_mutate_env(static_env_params: StaticEnvParams, params: EnvParams, ued_p
     return mutate_level
 
 
-def make_create_eval_env():
+def make_create_eval_env() -> Callable:
+    """Randomly sample a evaluation level from a list of OOD levels
+
+    Returns:
+        Callable: _description_
+    """
     eval_level1 = load_world_state_pickle("worlds/eval/eval_0610_car1")
     eval_level2 = load_world_state_pickle("worlds/eval/eval_0610_car2")
     eval_level3 = load_world_state_pickle("worlds/eval/eval_0628_ball_left")
@@ -134,19 +150,27 @@ def make_create_eval_env():
                 lambda: eval_level6,
             ],
         )
-        return jax.tree.map(lambda x, y: jax.lax.select(index == 0, x, y), eval_level1, eval_level2)
 
     return _create_eval_env
 
 
 def make_reset_train_function_with_mutations(
-    engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams, config, make_pcg_state=True
-):
+    engine: PhysicsEngine, 
+    env_params: EnvParams, 
+    static_env_params: StaticEnvParams, 
+    config:Dict, 
+    make_pcg_state:bool=True
+) -> Callable:
     ued_params = generate_ued_params_from_config(config)
 
     def reset(rng):
         inner = sample_kinetix_level(
-            rng, engine, env_params, static_env_params, ued_params, env_size_name=config["env_size_name"]
+            rng, 
+            engine, 
+            env_params, 
+            static_env_params, 
+            ued_params, 
+            env_size_name=config["env_size_name"]
         )
 
         if make_pcg_state:
@@ -158,7 +182,12 @@ def make_reset_train_function_with_mutations(
 
 
 def make_vmapped_filtered_level_sampler(
-    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, make_pcg_state, env
+    level_sampler, 
+    env_params: EnvParams, 
+    static_env_params: StaticEnvParams, 
+    config, 
+    make_pcg_state, 
+    env,
 ):
     ued_params = generate_ued_params_from_config(config)
 
@@ -234,7 +263,7 @@ def test_ued():
     ued_params = UEDParams()
     rng = jax.random.PRNGKey(0)
     rng, _rng = jax.random.split(rng)
-    state = create_empty_env(env_params, static_env_params)
+    state = create_empty_env(static_env_params)
     state = mutate_add_shape(_rng, state, env_params, static_env_params, ued_params)
     state = mutate_add_connected_shape(_rng, state, env_params, static_env_params, ued_params)
     state = mutate_remove_shape(_rng, state, env_params, static_env_params, ued_params)
