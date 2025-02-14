@@ -575,8 +575,11 @@ def main(config):
                 novlety_scores:chex.Array = get_novlety_scores(qd_embeds_flatten, config["num_to_save"])
                 print(f"Novelty scores shape: {novlety_scores.shape}")
                 print(f"Uncertainty shape: {uncertainty.shape}")
-                #TODO: why do such thing? + \
-                learnability = (4*uncertainty + novlety_scores)/2 + success_rates * 0.001
+
+                uncertainty = 4 * uncertainty
+                hermonic_mean = (2* uncertainty * novlety_scores) / (uncertainty + novlety_scores)
+
+                learnability = hermonic_mean + success_rates * 0.001
                 # uncertainy = p(1-p) p = solved rate 
                 # n_sample = 12288
                 # learnability = (a * b)/(a+b)
