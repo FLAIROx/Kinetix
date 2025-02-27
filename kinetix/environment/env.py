@@ -254,9 +254,26 @@ class PixelObservations(ObservationSpace):
 class SymbolicObservations(ObservationSpace):
     def __init__(self, params: EnvParams, static_env_params: StaticEnvParams):
         self.render_function = make_render_symbolic(params, static_env_params)
+        self.static_env_params = static_env_params
 
     def get_obs(self, state: EnvState):
         return self.render_function(state)
+
+    def observation_space(self, params: EnvParams) -> spaces.Box:
+        n_shapes = self.static_env_params.num_polygons + self.static_env_params.num_circles
+        n_features = (
+            (self.static_env_params.num_polygons - 3) * 26
+            + self.static_env_params.num_circles * 18
+            + self.static_env_params.num_joints * (22 + n_shapes * 2)
+            + self.static_env_params.num_thrusters * (8 + n_shapes)
+            + 1
+        )
+        return spaces.Box(
+            -np.inf,
+            np.inf,
+            (n_features,),
+            dtype=jnp.float32,
+        )
 
 
 class EntityObservations(ObservationSpace):
