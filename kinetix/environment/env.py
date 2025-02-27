@@ -279,9 +279,45 @@ class SymbolicObservations(ObservationSpace):
 class EntityObservations(ObservationSpace):
     def __init__(self, params: EnvParams, static_env_params: StaticEnvParams):
         self.render_function = make_render_entities(params, static_env_params)
+        self.static_env_params = static_env_params
 
     def get_obs(self, state: EnvState):
         return self.render_function(state)
+
+    def observation_space(self, params: EnvParams) -> spaces.Box:
+        n_shapes = self.static_env_params.num_polygons + self.static_env_params.num_circles
+        n_features = (
+            (self.static_env_params.num_polygons - 3) * 26
+            + self.static_env_params.num_circles * 18
+            + self.static_env_params.num_joints * (22 + n_shapes * 2)
+            + self.static_env_params.num_thrusters * (8 + n_shapes)
+            + 1
+        )
+
+        def _box(*shape, dtype=jnp.float32, low=-np.inf, high=np.inf):
+
+            return spaces.Box(
+                low,
+                high,
+                shape,
+                dtype=dtype,
+            )
+
+        return spaces.Dict(
+            dict(
+                circles=_box(self.static_env_params.num_circles, 19),
+                polygons=_box(self.static_env_params.num_polygons, 27),
+                joints=_box(self.static_env_params.num_joints * 2, 22),
+                thrusters=_box(self.static_env_params.num_thrusters, 8),
+                circle_mask=_box(self.static_env_params.num_circles, dtype=bool, low=0, high=1),
+                polygon_mask=_box(self.static_env_params.num_polygons, dtype=bool, low=0, high=1),
+                joint_mask=_box(self.static_env_params.num_joints * 2, dtype=bool, low=0, high=1),
+                thruster_mask=_box(self.static_env_params.num_thrusters, dtype=bool, low=0, high=1),
+                attention_mask=_box(4, n_shapes, n_shapes, dtype=bool, low=0, high=1),
+                joint_indexes=_box(self.static_env_params.num_joints * 2, 2, dtype=jnp.int32, low=0, high=n_shapes - 1),
+                thruster_indexes=_box(self.static_env_params.num_thrusters, dtype=jnp.int32, low=0, high=n_shapes - 1),
+            )
+        )
 
 
 class BlindObservations(ObservationSpace):
