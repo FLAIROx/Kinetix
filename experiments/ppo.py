@@ -1,50 +1,33 @@
 import os
-import hydra
-from omegaconf import OmegaConf
-
-from kinetix.environment.ued.ued import (
-    make_reset_train_function_with_list_of_levels,
-    make_reset_train_function_with_mutations,
-)
-from kinetix.render.renderer_pixels import make_render_pixels
-from kinetix.util.config import (
-    get_video_frequency,
-    init_wandb,
-    normalise_config,
-    generate_params_from_config,
-)
-
-os.environ["WANDB_DISABLE_SERVICE"] = "True"
-
-
-import sys
+import time
 from typing import Any, NamedTuple
 
+import hydra
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from flax.training.train_state import TrainState
-
-from kinetix.models import make_network_from_config
-from kinetix.util.learning import general_eval, get_eval_levels
 from flax.serialization import to_state_dict
+from flax.training.train_state import TrainState
+from omegaconf import OmegaConf
 
 import wandb
-from kinetix.environment.env import PixelObservations, make_kinetix_env_from_name
-from kinetix.environment.wrappers import (
-    AutoReplayWrapper,
-    AutoResetWrapper,
-    BatchEnvWrapper,
-    DenseRewardWrapper,
-    LogWrapper,
-    UnderspecifiedToGymnaxWrapper,
-)
-from kinetix.models.actor_critic import ScannedRNN
-from kinetix.util.saving import (
+from kinetix.environment import LogWrapper, PixelObservations
+from kinetix.environment.env import make_kinetix_env
+from kinetix.models import ScannedRNN, make_network_from_config
+from kinetix.render.renderer_pixels import make_render_pixels
+from kinetix.util import (
+    general_eval,
+    generate_params_from_config,
+    get_eval_levels,
+    get_video_frequency,
+    init_wandb,
     load_train_state_from_wandb_artifact_path,
-    save_model_to_wandb,
+    normalise_config,
+    save_model,
 )
+
+os.environ["WANDB_DISABLE_SERVICE"] = "True"
 
 
 class Transition(NamedTuple):
@@ -61,29 +44,8 @@ def make_train(config, env_params, static_env_params):
     config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
     config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
 
-    env = make_kinetix_env_from_name(config["env_name"], static_env_params=static_env_params)
-
-    if config["train_level_mode"] == "list":
-        reset_func = make_reset_train_function_with_list_of_levels(
-            config, config["train_levels_list"], static_env_params, is_loading_train_levels=True
-        )
-    elif config["train_level_mode"] == "random":
-        reset_func = make_reset_train_function_with_mutations(
-            env.physics_engine, env_params, env.static_env_params, config
-        )
-    else:
-        raise ValueError(f"Unknown train_level_mode: {config['train_level_mode']}")
-
-    env = UnderspecifiedToGymnaxWrapper(AutoResetWrapper(env, reset_func))
-
-    eval_env = make_kinetix_env_from_name(config["env_name"], static_env_params=static_env_params)
-    eval_env = UnderspecifiedToGymnaxWrapper(AutoReplayWrapper(eval_env))
-
-    env = DenseRewardWrapper(env)
-    env = LogWrapper(env)
-    env = BatchEnvWrapper(env, num_envs=config["num_train_envs"])
-
-    eval_env_nonbatch = LogWrapper(DenseRewardWrapper(eval_env))
+    env = LogWrapper(make_kinetix_env(config, env_params, static_env_params))
+    eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, make_empty_reset_func=True))
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]
@@ -103,11 +65,14 @@ def make_train(config, env_params, static_env_params):
             config["peak_lr"] * jnp.maximum(0.0, 0.5 * (1.0 + jnp.cos(jnp.pi * ((frac_cosine) % 1.0)))),
         )
 
+    time_start = time.time()
+
     def train(rng):
+        last_time = time.time()
         # INIT NETWORK
         network = make_network_from_config(env, env_params, config)
         rng, _rng = jax.random.split(rng)
-        obsv, env_state = env.reset(_rng, env_params)
+        obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
         dones = jnp.zeros((config["num_train_envs"]), dtype=jnp.bool_)
         rng, _rng = jax.random.split(rng)
         init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
@@ -145,7 +110,7 @@ def make_train(config, env_params, static_env_params):
             )
         # INIT ENV
         rng, _rng = jax.random.split(rng)
-        obsv, env_state = env.reset(_rng, env_params)
+        obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
         init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
         render_static_env_params = env.static_env_params.replace(downscale=4)
         pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
@@ -156,7 +121,7 @@ def make_train(config, env_params, static_env_params):
             def _single_eval_step(rng):
                 return general_eval(
                     rng,
-                    eval_env_nonbatch,
+                    eval_env,
                     env_params,
                     runner_state[0],
                     eval_levels,
@@ -169,11 +134,11 @@ def make_train(config, env_params, static_env_params):
             (states, returns, done_idxs, episode_lengths, eval_infos), (eval_dones, eval_rewards) = jax.vmap(
                 _single_eval_step
             )(jax.random.split(rng, config["eval_num_attempts"]))
-            eval_solves = (eval_infos["returned_episode_solved"] * eval_dones).sum(axis=1) / jnp.maximum(
-                1, eval_dones.sum(axis=1)
+            mask = jnp.arange(env_params.max_timesteps)[None, ..., None] < episode_lengths[:, None, :]
+            eval_solves = (eval_infos["returned_episode_solved"] * eval_dones * mask).sum(axis=1) / jnp.maximum(
+                1, (eval_dones * mask).sum(axis=1)
             )
             states_to_plot = jax.tree.map(lambda x: x[0], states)
-            # obs = jax.vmap(jax.vmap(pixel_render_fn))(states_to_plot.env_state.env_state.env_state)
 
             return (
                 states_to_plot,
@@ -212,7 +177,9 @@ def make_train(config, env_params, static_env_params):
 
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
-                obsv, env_state, reward, done, info = env.step(_rng, env_state, action, env_params)
+                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+                    jax.random.split(_rng, config["num_train_envs"]), env_state, action, env_params
+                )
                 transition = Transition(last_done, action, value, reward, log_prob, last_obs, info)
                 runner_state = (
                     train_state,
@@ -362,48 +329,90 @@ def make_train(config, env_params, static_env_params):
             rng = update_state[-1]
 
             if config["use_wandb"]:
-                vid_frequency = get_video_frequency(config, update_step)
-                rng, _rng = jax.random.split(rng)
-                to_log_videos = _vmapped_eval_step(runner_state, _rng)
-                should_log_videos = update_step % vid_frequency == 0
-                first = jax.lax.cond(
-                    should_log_videos,
-                    lambda: jax.vmap(jax.vmap(pixel_render_fn))(to_log_videos[0].env_state.env_state.env_state),
-                    lambda: (
-                        jnp.zeros(
-                            (
-                                env_params.max_timesteps,
-                                config["num_eval_levels"],
-                                *PixelObservations(env_params, render_static_env_params)
-                                .observation_space(env_params)
-                                .shape,
-                            )
+
+                def _fake_video():
+                    return jnp.zeros(
+                        (
+                            env_params.max_timesteps,
+                            config["num_eval_levels"],
+                            *PixelObservations(env_params, render_static_env_params)
+                            .observation_space(env_params)
+                            .shape,
                         )
-                    ),
+                    )
+
+                def _real_eval(rng, update_step):
+                    vid_frequency = get_video_frequency(config, update_step)
+                    rng, _rng = jax.random.split(rng)
+                    to_log_videos = _vmapped_eval_step(runner_state, _rng)
+                    should_log_videos = update_step % vid_frequency == 0
+                    first = jax.lax.cond(
+                        should_log_videos,
+                        lambda: jax.vmap(jax.vmap(pixel_render_fn))(to_log_videos[0].env_state),
+                        lambda: (_fake_video()),
+                    )
+                    return (first, should_log_videos, True, *to_log_videos[1:])
+
+                def _fake_eval(rng, update_step):
+
+                    return (
+                        _fake_video(),
+                        False,
+                        False,
+                        jnp.zeros((config["num_eval_levels"],), jnp.int32),  # lengths
+                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # returns for video
+                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # returns avg
+                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # ep lengths avg
+                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # solve avg
+                    )
+
+                rng, _rng = jax.random.split(rng)
+                to_log_videos = jax.lax.cond(
+                    update_step % config["eval_freq"] == 0, _real_eval, _fake_eval, _rng, update_step
                 )
-                to_log_videos = (first, should_log_videos, *to_log_videos[1:])
 
                 def callback(metric, raw_info, loss_info, update_step, to_log_videos):
-                    to_log = {}
+                    nonlocal last_time
+                    time_now = time.time()
+                    delta_time = time_now - last_time
+                    last_time = time_now
+                    dones = raw_info["returned_episode"]
+                    to_log = {
+                        "episode_return": (raw_info["returned_episode_returns"] * dones).sum()
+                        / jnp.maximum(1, dones.sum()),
+                        "episode_solved": (raw_info["returned_episode_solved"] * dones).sum()
+                        / jnp.maximum(1, dones.sum()),
+                        "episode_length": (raw_info["returned_episode_lengths"] * dones).sum()
+                        / jnp.maximum(1, dones.sum()),
+                        "num_completed_episodes": dones.sum(),
+                    }
                     to_log["timing/num_updates"] = update_step
-                    to_log["timing/num_env_steps"] = update_step * config["num_steps"] * config["num_train_envs"]
+                    to_log["timing/num_env_steps"] = (
+                        int(update_step) * int(config["num_steps"]) * int(config["num_train_envs"])
+                    )
+                    to_log["timing/sps"] = (config["num_steps"] * config["num_train_envs"]) / delta_time
+                    to_log["timing/sps_agg"] = (to_log["timing/num_env_steps"]) / (time_now - time_start)
                     (
                         obs_vid,
                         should_log_videos,
+                        should_log_eval,
                         idx_vid,
                         eval_return_vid,
                         eval_return_mean,
                         eval_eplen_mean,
                         eval_solverate_mean,
                     ) = to_log_videos
-                    to_log["eval/mean_eval_return"] = eval_return_mean.mean()
-                    to_log["eval/mean_eval_eplen"] = eval_eplen_mean.mean()
-                    for i, eval_name in enumerate(config["eval_levels"]):
-                        return_on_video = eval_return_vid[i]
-                        to_log[f"eval_video/return_{eval_name}"] = return_on_video
-                        to_log[f"eval_video/len_{eval_name}"] = idx_vid[i]
-                        to_log[f"eval_avg/return_{eval_name}"] = eval_return_mean[i]
-                        to_log[f"eval_avg/solve_rate_{eval_name}"] = eval_solverate_mean[i]
+
+                    if should_log_eval:
+                        to_log["eval/mean_eval_return"] = eval_return_mean.mean()
+                        to_log["eval/mean_eval_eplen"] = eval_eplen_mean.mean()
+                        to_log["eval/mean_eval_solve"] = eval_solverate_mean.mean()
+                        for i, eval_name in enumerate(config["eval_levels"]):
+                            return_on_video = eval_return_vid[i]
+                            to_log[f"eval_video/return_{eval_name}"] = return_on_video
+                            to_log[f"eval_video/len_{eval_name}"] = idx_vid[i]
+                            to_log[f"eval_avg/return_{eval_name}"] = eval_return_mean[i]
+                            to_log[f"eval_avg/solve_rate_{eval_name}"] = eval_solverate_mean[i]
 
                     if should_log_videos:
                         for i, eval_name in enumerate(config["eval_levels"]):
@@ -460,10 +469,9 @@ def main(config):
 
     out = train_jit(_rng)
 
-    if config["use_wandb"]:
-        if config["save_policy"]:
-            train_state = jax.tree.map(lambda x: x, out["runner_state"][0])
-            save_model_to_wandb(train_state, config["total_timesteps"], config)
+    if config["save_policy"]:
+        train_state = jax.tree.map(lambda x: x, out["runner_state"][0])
+        save_model(train_state, config["total_timesteps"], config, save_to_wandb=config["use_wandb"])
 
 
 if __name__ == "__main__":

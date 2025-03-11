@@ -8,6 +8,6 @@ eval_levels:
         "l/mjc_walker",
         "l/mjc_walker_easy",
   ]
-eval_num_attempts: 10
+eval_num_attempts: 20
 eval_freq: 10
 EVAL_ON_SAMPLED: false

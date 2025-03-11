@@ -1,4 +1,4 @@
 eval_levels: "auto"
-eval_num_attempts: 10
+eval_num_attempts: 20
 eval_freq: 10
 EVAL_ON_SAMPLED: false

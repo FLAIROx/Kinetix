@@ -3,28 +3,23 @@ import jax.numpy as jnp
 import jax.random
 from matplotlib import pyplot as plt
 
-from kinetix.environment import make_kinetix_env
+from kinetix.environment import EnvParams, make_kinetix_env
 from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.render import make_render_pixels
-from kinetix.util import load_from_json_file
 
 
+# This applies normal gymnax auto-reset behaviour, resetting to a different randomly-generated level each time.
 def main():
-    # Load a premade level
-    level, static_env_params, env_params = load_from_json_file("worlds/l/grasp_easy.json")
-
+    env_params = EnvParams()
     # Create the environment
     env = make_kinetix_env(
-        config=None,
+        config={"train_level_mode": "random"},
         observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
         env_params=env_params,
-        static_env_params=static_env_params,
-        reset_func=lambda _rng: level,
     )
-
     rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)
-    # Reset the environment state---this resets to the premade level based on the reset function
+    # Reset the environment state (this resets to a random level)
     obs, env_state = env.reset(_rng_reset, env_params)
 
     # Take a step in the environment
@@ -32,9 +27,10 @@ def main():
     obs, env_state, reward, done, info = env.step(_rng_step, env_state, action, env_params)
 
     # Render environment
-    renderer = make_render_pixels(env_params, static_env_params)
+    renderer = make_render_pixels(env_params, env.static_env_params)
 
     pixels = renderer(env_state)
+
     plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
     plt.show()
 

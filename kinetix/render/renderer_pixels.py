@@ -1,34 +1,19 @@
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from jax2d import joint
+from flax import struct
 from jax2d.engine import select_shape
 from jax2d.maths import rmat
-from jax2d.sim_state import RigidBody
 from jaxgl.maths import dist_from_line
 from jaxgl.renderer import clear_screen, make_renderer
-from jaxgl.shaders import (
-    fragment_shader_quad,
-    fragment_shader_edged_quad,
-    make_fragment_shader_texture,
-    nearest_neighbour,
-    make_fragment_shader_quad_textured,
-)
+from jaxgl.shaders import fragment_shader_edged_quad, nearest_neighbour
 
-from kinetix.render.textures import (
-    THRUSTER_TEXTURE_16_RGBA,
-    RJOINT_TEXTURE_6_RGBA,
-    FJOINT_TEXTURE_6_RGBA,
-)
-from kinetix.environment.env_state import StaticEnvParams, EnvParams, EnvState
-from flax import struct
+from kinetix.environment.env_state import EnvState, StaticEnvParams
+from kinetix.render.textures import FJOINT_TEXTURE_6_RGBA, RJOINT_TEXTURE_6_RGBA, THRUSTER_TEXTURE_16_RGBA
 
 
 def make_render_pixels(
-    params,
+    env_params,
     static_params: StaticEnvParams,
 ):
     screen_dim = static_params.screen_dim
@@ -80,7 +65,7 @@ def make_render_pixels(
         )[2 * f + is_not_normal]
 
     # Pixels per unit distance
-    ppud = params.pixels_per_unit // downscale
+    ppud = env_params.pixels_per_unit // downscale
 
     downscaled_screen_dim = (screen_dim[0] // downscale, screen_dim[1] // downscale)
 
@@ -100,7 +85,6 @@ def make_render_pixels(
         inside = dist <= radius
         on_edge = dist > radius - 2
 
-        # TODO - precompute?
         normal = jnp.array([jnp.sin(rotation), -jnp.cos(rotation)])
 
         dist = dist_from_line(position, centre, centre + normal)
@@ -277,8 +261,8 @@ class PixelsObservation:
     global_info: jnp.ndarray
 
 
-def make_render_pixels_rl(params, static_params: StaticEnvParams):
-    render_fn = make_render_pixels(params, static_params)
+def make_render_pixels_rl(env_params, static_params: StaticEnvParams):
+    render_fn = make_render_pixels(env_params, static_params)
 
     def inner(state):
         pixels = render_fn(state) / 255.0

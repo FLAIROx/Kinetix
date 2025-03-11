@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinetix"
-version = "0.1.0"
+version = "1.0.0"
 authors = [
   { name="Michael Matthews", email="michael.matthews@eng.ox.ac.uk" },
   { name="Michael Beukman", email="michael.beukman@eng.ox.ac.uk" },
@@ -18,10 +18,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "jax[cuda12_pip]==0.4.35",
+    "jax[cuda12_pip]==0.4.37",
     "distrax",
     "optax",
-    "flax",
+    "flax==0.10.4",
     "numpy==1.26.4",
     "black",
     "pre-commit",
@@ -36,9 +36,9 @@ dependencies = [
     "seaborn",
     "hydra-core",
     "safetensors",
-    "pygame_widgets",
+    "pygame_widgets==1.1.5",
     "jaxgl",
-    "jax2d==1.0.0",
+    "jax2d==1.0.1",
     "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
     "moviepy==1.0.3",
 ]

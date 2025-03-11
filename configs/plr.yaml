@@ -12,6 +12,7 @@ defaults:
   - model: 
     - model-base
     - model-transformer
+    - model-perm-invariant-mlp
   - _self_
 
 seed: 0

@@ -1,19 +1,14 @@
-import functools
-import jax.numpy as jnp
-import flax.linen as nn
-import numpy as np
-from flax.linen.initializers import constant, orthogonal
 from typing import List, Sequence
 
-import distrax
+import flax.linen as nn
 import jax
-
-from kinetix.models.actor_critic import GeneralActorCriticRNN, ScannedRNN
-
-
-from kinetix.render.renderer_symbolic_entity import EntityObservation
-
+import jax.numpy as jnp
+import numpy as np
 from flax.linen.attention import MultiHeadDotProductAttention
+from flax.linen.initializers import constant, orthogonal
+
+from kinetix.models.actor_critic import GeneralActorCriticRNN
+from kinetix.render.renderer_symbolic_entity import EntityObservation
 
 
 class Gating(nn.Module):
@@ -215,7 +210,7 @@ class ActorCriticTransformer(nn.Module):
                 )(features)
             )
             if concat:
-                id_1h = jnp.zeros((*embedding.shape[:3], 1)).at[:, :, :, entity_id].set(entity_id)
+                id_1h = jnp.zeros((*embedding.shape[:3], 1)).at[:, :, :, 0].set(entity_id)
                 return jnp.concatenate([embedding, id_1h], axis=-1)
             else:
                 return embedding
@@ -293,7 +288,7 @@ class ActorCriticTransformer(nn.Module):
             action_dim=self.action_dim,
             fc_layer_depth=self.fc_layer_depth,
             fc_layer_width=self.fc_layer_width,
-            action_mode=self.action_mode,
+            action_type=self.action_mode,
             hybrid_action_continuous_dim=self.hybrid_action_continuous_dim,
             multi_discrete_number_of_dims_per_distribution=self.multi_discrete_number_of_dims_per_distribution,
             add_generator_embedding=self.add_generator_embedding,

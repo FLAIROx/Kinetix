@@ -3,9 +3,9 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-
 from jax2d.engine import PhysicsEngine, calculate_collision_matrix, recalculate_mass_and_inertia, select_shape
 from jax2d.sim_state import RigidBody, Thruster
+
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
 
 
@@ -333,13 +333,15 @@ def make_velocities_zero(state: EnvState):
 
 
 def make_do_dummy_step(
-    params: EnvParams, static_sim_params: StaticEnvParams, zero_collisions=True, zero_velocities=True
+    env_params: EnvParams, static_sim_params: StaticEnvParams, zero_collisions=True, zero_velocities=True
 ):
     env = PhysicsEngine(static_sim_params)
 
     @jax.jit
     def _step_fn(state):
-        state, _ = env.step(state, params, jnp.zeros((static_sim_params.num_joints + static_sim_params.num_thrusters,)))
+        state, _ = env.step(
+            state, env_params, jnp.zeros((static_sim_params.num_joints + static_sim_params.num_thrusters,))
+        )
         return state
 
     def do_dummy_step(state: EnvState) -> EnvState:

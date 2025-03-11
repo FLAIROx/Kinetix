@@ -1,65 +1,21 @@
-import itertools
-import time
-from timeit import default_timer as tmr
-
-import optax
-from PIL import Image
-from flax.serialization import to_state_dict
-from flax.training.train_state import TrainState
-
-from matplotlib import pyplot as plt
-
-from kinetix.environment.ued.distributions import sample_kinetix_level
-from kinetix.models import make_network_from_config
-from kinetix.models.actor_critic import ScannedRNN
-from kinetix.render.renderer_symbolic_entity import make_render_entities
-
-ss = tmr()
-
-import jax
-
-jax.config.update("jax_compilation_cache_dir", ".cache-location")
-
-import hydra
-from omegaconf import OmegaConf
-
-from kinetix.environment.ued.mutators import (
-    make_mutate_change_shape_rotation,
-    mutate_add_connected_shape,
-    mutate_add_shape,
-    make_mutate_change_shape_size,
-    mutate_change_shape_location,
-    mutate_swap_role,
-    mutate_remove_shape,
-    mutate_remove_joint,
-    mutate_toggle_fixture,
-    mutate_add_thruster,
-    mutate_remove_thruster,
-)
-from kinetix.environment.ued.ued import make_mutate_env, ALL_MUTATION_FNS
-from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.environment.ued.util import rectangle_vertices
-from kinetix.util.config import generate_params_from_config, normalise_config
-
-
-import argparse
 import os
 import sys
-
-sys.path.append("editor")
+import time
 import tkinter
 import tkinter.filedialog
 from enum import Enum
 from timeit import default_timer as tmr
+from tkinter import Tk
 
+import hydra
+import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import pygame
 import pygame_widgets
-from pygame_widgets.slider import Slider
-from pygame_widgets.textbox import TextBox
-from pygame_widgets.toggle import Toggle
-
+from flax.serialization import to_state_dict
+from flax.training.train_state import TrainState
 from jax2d.engine import (
     calc_inverse_inertia_circle,
     calc_inverse_inertia_polygon,
@@ -72,16 +28,39 @@ from jax2d.engine import (
 )
 from jax2d.maths import rmat
 from jax2d.sim_state import RigidBody
-from kinetix.environment.env import (
+from omegaconf import OmegaConf
+from PIL import Image
+from pygame_widgets.slider import Slider
+from pygame_widgets.textbox import TextBox
+from pygame_widgets.toggle import Toggle
+
+from kinetix.environment import (
+    EnvParams,
+    EnvState,
+    StaticEnvParams,
+    UEDParams,
     create_empty_env,
-    make_kinetix_env_from_name,
+    make_kinetix_env,
+    permute_state,
 )
-from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
-from kinetix.environment.utils import permute_pcg_state
-from kinetix.environment.wrappers import AutoResetWrapper
-from kinetix.pcg.pcg import env_state_to_pcg_state, sample_pcg_state
-from kinetix.pcg.pcg_state import PCGState
-from kinetix.render.renderer_pixels import make_render_pixels
+from kinetix.environment.ued.mutators import (
+    make_mutate_change_shape_rotation,
+    make_mutate_change_shape_size,
+    mutate_add_connected_shape,
+    mutate_add_shape,
+    mutate_add_thruster,
+    mutate_change_shape_location,
+    mutate_remove_joint,
+    mutate_remove_shape,
+    mutate_remove_thruster,
+    mutate_swap_role,
+    mutate_toggle_fixture,
+)
+from kinetix.environment.ued.ued import ALL_MUTATION_FNS, make_mutate_env
+from kinetix.environment.ued.util import rectangle_vertices
+from kinetix.environment.utils import ActionType, ObservationType
+from kinetix.models import ScannedRNN, make_network_from_config
+from kinetix.render import make_render_entities, make_render_pixels
 from kinetix.render.textures import (
     CIRCLE_TEXTURE_RGBA,
     EDIT_TEXTURE_RGBA,
@@ -92,19 +71,25 @@ from kinetix.render.textures import (
     THRUSTER_TEXTURE_RGBA,
     TRIANGLE_TEXTURE_RGBA,
 )
-from kinetix.util.saving import (
-    expand_pcg_state,
+from kinetix.util import (
     export_env_state_to_json,
-    get_pcg_state_from_json,
+    generate_params_from_config,
+    get_env_state_from_json,
     load_from_json_file,
-    load_pcg_state_pickle,
-    load_world_state_pickle,
-    save_pickle,
-    load_params_from_wandb_artifact_path,
     load_train_state_from_wandb_artifact_path,
+    normalise_config,
+    save_pickle,
+    time_function,
 )
-from kinetix.util.timing import time_function
-from tkinter import Tk
+
+ss = tmr()
+
+
+jax.config.update("jax_compilation_cache_dir", ".cache-location")
+
+
+sys.path.append("editor")
+
 
 root = Tk()
 root.destroy()
@@ -115,6 +100,16 @@ print(f"Imported in {ee - ss} seconds")
 editor = None
 outer_timer = tmr()
 EMPTY_ENV = False
+
+
+@jax.jit
+def _signed_line_distance(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+@jax.jit
+def _mouse_dist_to_vertices(mpos, i1, i2, vertices):
+    return _signed_line_distance(mpos, vertices[i1], vertices[i2])
 
 
 class ObjectType(Enum):
@@ -212,18 +207,18 @@ myrng = jax.random.PRNGKey(0)
 
 def make_reset_function(static_env_params):
     def reset(rng):
-        return env_state_to_pcg_state(create_empty_env(static_env_params))
+        return create_empty_env(static_env_params)
 
     return reset
 
 
-def new_pcg_env(static_env_params):
+def new_env(static_env_params):
     global myrng
     if EMPTY_ENV:
         env_state = create_empty_env(static_env_params)
     else:
-        return get_pcg_state_from_json("worlds/l/h0_angrybirds.json")
-    return env_state_to_pcg_state(env_state)
+        env_state = get_env_state_from_json("worlds/l/h0_angrybirds.json")
+    return env_state
 
 
 class Editor:
@@ -238,10 +233,10 @@ class Editor:
 
         self.rng = jax.random.PRNGKey(0)
         self.config = config
-        self.pcg_state = new_pcg_env(self.static_env_params)
+        self.env_state = new_env(self.static_env_params)
 
         self.rng, _rng = jax.random.split(self.rng)
-        self.play_state = sample_pcg_state(_rng, self.pcg_state, self.env_params, self.static_env_params)
+        self.play_state = self.env_state
         self.last_played_level = None
 
         self.pygame_events = []
@@ -304,7 +299,7 @@ class Editor:
             rng = jax.random.PRNGKey(0)
             ans = self._step_fn(
                 rng,
-                self.env.reset_env_to_level(rng, self.play_state, self.env_params)[1],
+                self.env.reset(rng, self.env_params, self.play_state)[1],
                 jnp.zeros(
                     env.static_env_params.num_motor_bindings + env.static_env_params.num_thruster_bindings, dtype=int
                 ),
@@ -334,7 +329,7 @@ class Editor:
 
         self.rng = jax.random.PRNGKey(0)
         time_function(self._jit, "self._jit")
-        self._put_state_values_into_gui(self.pcg_state)
+        self._put_state_values_into_gui(self.env_state)
 
         self.mutate_change_shape_size = make_mutate_change_shape_size(self.env_params, self.static_env_params)
         self.mutate_change_shape_rotation = make_mutate_change_shape_rotation(self.env_params, self.static_env_params)
@@ -343,7 +338,7 @@ class Editor:
         def _make_render(should_do_edit_additions=False):
             def _render(env_state):
                 side_panel = self._render_side_panel()
-                render_pixels = make_render_pixels(params=env_params, static_params=static_env_params)
+                render_pixels = make_render_pixels(env_params=env_params, static_params=static_env_params)
                 pixels = render_pixels(
                     env_state,
                 )
@@ -366,7 +361,7 @@ class Editor:
                 )
 
                 render_pixels = make_render_pixels(
-                    params=ss_env_params,
+                    env_params=ss_env_params,
                     static_params=static_params,
                     render_rjoint_sectors=False,
                     pixel_upscale=2 * px_upscale,
@@ -384,10 +379,10 @@ class Editor:
         self._render_fn_screenshot = jax.jit(_make_screenshot_render())
 
     def _jit(self):
-        self._get_circles_on_mouse(self.pcg_state.env_state)
-        self._get_polygons_on_mouse(self.pcg_state.env_state)
-        self._get_revolute_joints_on_mouse(self.pcg_state.env_state)
-        self._get_thrusters_on_mouse(self.pcg_state.env_state)
+        self._get_circles_on_mouse(self.env_state)
+        self._get_polygons_on_mouse(self.env_state)
+        self._get_revolute_joints_on_mouse(self.env_state)
+        self._get_thrusters_on_mouse(self.env_state)
         self.pygame_events = list(pygame.event.get())
         self._handle_events(do_dummy=True)
 
@@ -405,28 +400,19 @@ class Editor:
                     self.has_done_action = False
                     self.is_editing = not self.is_editing
                     if not self.is_editing:
-                        self.pcg_state = self._discard_shape_being_created(self.pcg_state)
-                        self.pcg_state = self._reset_select_shape(self.pcg_state)
-                        self.pcg_state = self.pcg_state.replace(
-                            env_state=self.pcg_state.env_state.replace(
-                                collision_matrix=calculate_collision_matrix(
-                                    self.static_env_params, self.pcg_state.env_state.joint
-                                ),
-                            ),
-                            env_state_pcg_mask=self.pcg_state.env_state_pcg_mask.replace(
-                                collision_matrix=jnp.zeros_like(self.pcg_state.env_state_pcg_mask.collision_matrix)
-                            ),
+                        self.env_state = self._discard_shape_being_created(self.env_state)
+                        self.env_state = self._reset_select_shape(self.env_state)
+                        self.env_state = self.env_state.replace(
+                            collision_matrix=calculate_collision_matrix(self.static_env_params, self.env_state.joint),
                         )
                         self.rng, _rng = jax.random.split(self.rng)
-                        self.play_state = sample_pcg_state(
-                            _rng, self.pcg_state, self.env_params, self.static_env_params
-                        )
+                        self.play_state = self.env_state
                         self.last_played_level = self.play_state
                 elif event.key == pygame.K_s and not self.is_editing:
                     self.take_screenshot()
 
         if self.is_editing:
-            self.pcg_state = self.edit()
+            self.env_state = self.edit()
         else:
             rng, _rng = jax.random.split(rng)
             # action = []
@@ -470,12 +456,12 @@ class Editor:
 
             _rng, __rng = jax.random.split(_rng)
             obs, self.play_state, reward, done, info = self._step_fn(
-                _rng, self.env.reset_to_level(__rng, self.play_state, self.env_params)[1], action, self.env_params
+                _rng, self.env.reset(__rng, self.env_params, self.play_state)[1], action, self.env_params
             )
             if done:
                 self.rng, _rng = jax.random.split(self.rng)
-                self.play_state = sample_pcg_state(_rng, self.pcg_state, self.env_params, self.static_env_params)
-        state_to_render = self.pcg_state.env_state if self.is_editing else self.play_state
+                self.play_state = self.env_state
+        state_to_render = self.env_state if self.is_editing else self.play_state
 
         self.render(state_to_render)
         self._handle_events()
@@ -515,79 +501,27 @@ class Editor:
         pygame_widgets.update(self.pygame_events)
         if do_dummy or self.selected_shape_index < 0:
             gravity_main = self.all_widgets[None]["sldGravity"].getValue()
-            gravity_max = self.all_widgets[None]["sldMaxGravity"].getValue()
-            gravity_main, gravity_max = min(gravity_main, gravity_max), max(gravity_main, gravity_max)
-            gravity_pcg_mask = self.all_widgets[None]["pcgTglGravity"].getValue()
 
             def _set_single_global(state, gravity):
                 return state.replace(
                     gravity=state.gravity.at[1].set(gravity),
                 )
 
-            env_state = _set_single_global(self.pcg_state.env_state, gravity_main)
-            env_state_max = _set_single_global(self.pcg_state.env_state_max, gravity_max)
-            env_state_pcg_mask = _set_single_global(self.pcg_state.env_state_pcg_mask, gravity_pcg_mask)
+            env_state = _set_single_global(self.env_state, gravity_main)
             if not do_dummy:
-                self.pcg_state = self.pcg_state.replace(
-                    env_state=env_state,
-                    env_state_max=env_state_max,
-                    env_state_pcg_mask=env_state_pcg_mask,
-                )
+                self.env_state = env_state
 
         if self.edit_shape_mode == EditMode.SELECT or do_dummy:  # is on the hand.
-            if do_dummy or len(self.all_selected_shapes) > 1:
-                # this processes the tying together.
-                indices_to_use = self._get_selected_shape_global_indices()
-                if len(indices_to_use) > 1:
-                    toggle_val = self.all_widgets["TIE_TOGETHER"]["tglTieTogether"].getValue()
-                    idxs = itertools.product(indices_to_use, indices_to_use)
-                    idxs_a = []
-                    idxs_b = []
-                    for i, j in idxs:
-                        idxs_a.append(i)
-                        idxs_b.append(j)
-                    idxs = jnp.array(idxs_a), jnp.array(idxs_b)
-                    if toggle_val:
-                        self.pcg_state = self.pcg_state.replace(
-                            tied_together=self.pcg_state.tied_together.at[idxs[0], idxs[1]].set(True)
-                        )
-                    else:
-                        self.pcg_state = self.pcg_state.replace(
-                            tied_together=self.pcg_state.tied_together.at[idxs[0], idxs[1]].set(False)
-                        )
             if self.selected_shape_index < 0 and not do_dummy:
                 return
             if do_dummy or self.selected_shape_type in [ObjectType.POLYGON, ObjectType.CIRCLE]:  # rigidbody
-                shape_main = select_object(
-                    self.pcg_state.env_state, self.selected_shape_type, self.selected_shape_index
-                )
-                shape_max = select_object(
-                    self.pcg_state.env_state_max, self.selected_shape_type, self.selected_shape_index
-                )
+                shape_main = select_object(self.env_state, self.selected_shape_type, self.selected_shape_index)
 
                 parent_container_main = (
-                    self.pcg_state.env_state.circle
-                    if self.selected_shape_type == ObjectType.CIRCLE
-                    else self.pcg_state.env_state.polygon
-                )
-                parent_container_max = (
-                    self.pcg_state.env_state_max.circle
-                    if self.selected_shape_type == ObjectType.CIRCLE
-                    else self.pcg_state.env_state_max.polygon
-                )
-                parent_container_pcg_mask = (
-                    self.pcg_state.env_state_pcg_mask.circle
-                    if self.selected_shape_type == ObjectType.CIRCLE
-                    else self.pcg_state.env_state_pcg_mask.polygon
+                    self.env_state.circle if self.selected_shape_type == ObjectType.CIRCLE else self.env_state.polygon
                 )
 
                 new_density_main = self.all_widgets[self.selected_shape_type]["sldDensity"].getValue()
-                new_density_max = self.all_widgets[self.selected_shape_type]["sldMaxDensity"].getValue()
-                density_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglDensity"].getValue()
-                if density_pcg_mask:
-                    new_density_main, new_density_max = min(new_density_main, new_density_max), max(
-                        new_density_main, new_density_max
-                    )
                 fixated = self.all_widgets[self.selected_shape_type]["tglFixate"].getValue()
 
                 fix_val = 0.0 if fixated else 1.0
@@ -611,14 +545,8 @@ class Editor:
                     return inv_mass, inv_inertia
 
                 inv_mass_main, inv_inertia_main = _density_calcs(shape_main, new_density_main)
-                inv_mass_max, inv_inertia_max = _density_calcs(shape_max, new_density_max)
 
                 friction_main = self.all_widgets[self.selected_shape_type]["sldFriction"].getValue()
-                friction_max = self.all_widgets[self.selected_shape_type]["sldMaxFriction"].getValue()
-                friction_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglFriction"].getValue()
-                if friction_pcg_mask:
-                    friction_main, friction_max = min(friction_main, friction_max), max(friction_main, friction_max)
-
                 restitution = self.all_widgets[self.selected_shape_type]["sldRestitution"].getValue()
 
                 position_main = jnp.array(
@@ -628,23 +556,7 @@ class Editor:
                     ]
                 )
 
-                position_max = jnp.array(
-                    [
-                        self.all_widgets[self.selected_shape_type]["sldMaxPosition_X"].getValue(),
-                        self.all_widgets[self.selected_shape_type]["sldMaxPosition_Y"].getValue(),
-                    ]
-                )
-                position_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglPosition_X"].getValue()
-                if position_pcg_mask:
-                    position_main, position_max = jnp.minimum(position_main, position_max), jnp.maximum(
-                        position_main, position_max
-                    )
-
                 rotation_main = self.all_widgets[self.selected_shape_type]["sldRotation"].getValue()
-                rotation_max = self.all_widgets[self.selected_shape_type]["sldMaxRotation"].getValue()
-                rotation_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglRotation"].getValue()
-                if rotation_pcg_mask:
-                    rotation_main, rotation_max = min(rotation_main, rotation_max), max(rotation_main, rotation_max)
 
                 velocity_main = jnp.array(
                     [
@@ -653,51 +565,23 @@ class Editor:
                     ]
                 )
 
-                velocity_max = jnp.array(
-                    [
-                        self.all_widgets[self.selected_shape_type]["sldMaxVelocity_X"].getValue(),
-                        self.all_widgets[self.selected_shape_type]["sldMaxVelocity_Y"].getValue(),
-                    ]
-                )
-                velocity_main, velocity_max = jnp.minimum(velocity_main, velocity_max), jnp.maximum(
-                    velocity_main, velocity_max
-                )
-                velocity_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglVelocity_X"].getValue()
-
                 angular_velocity_main = self.all_widgets[self.selected_shape_type]["sldAngular_Velocity"].getValue()
-                angular_velocity_max = self.all_widgets[self.selected_shape_type]["sldMaxAngular_Velocity"].getValue()
-                angular_velocity_pcg_mask = self.all_widgets[self.selected_shape_type][
-                    "pcgTglAngular_Velocity"
-                ].getValue()
-                if angular_velocity_pcg_mask:
-                    angular_velocity_main, angular_velocity_max = min(angular_velocity_main, angular_velocity_max), max(
-                        angular_velocity_main, angular_velocity_max
-                    )
 
                 # Circle stuff
-                radius_main, radius_max, radius_pcg_mask = None, None, None
+                radius_main = None
                 if self.selected_shape_type == ObjectType.CIRCLE:
                     radius_main = self.all_widgets[self.selected_shape_type]["sldRadius"].getValue()
-                    radius_max = self.all_widgets[self.selected_shape_type]["sldMaxRadius"].getValue()
-                    radius_pcg_mask = self.all_widgets[self.selected_shape_type]["pcgTglRadius"].getValue()
 
                 # Poly stuff
-                vertices_main, vertices_max, vertices_pcg_mask = None, None, None
+                vertices_main = None
                 if self.selected_shape_type == ObjectType.POLYGON:
                     # Triangle
                     new_size_main = self.all_widgets[self.selected_shape_type]["sldSize"].getValue()
-                    new_size_max = self.all_widgets[self.selected_shape_type]["sldMaxSize"].getValue()
 
-                    current_size = jnp.abs(self.pcg_state.env_state.polygon.vertices[self.selected_shape_index]).max()
+                    current_size = jnp.abs(self.env_state.polygon.vertices[self.selected_shape_index]).max()
                     scale_main = new_size_main / current_size
-                    scale_max = new_size_max / current_size
 
-                    vertices_main = self.pcg_state.env_state.polygon.vertices[self.selected_shape_index] * scale_main
-                    vertices_max = self.pcg_state.env_state.polygon.vertices[self.selected_shape_index] * scale_max
-                    vertices_pcg_mask = (
-                        jnp.ones_like(vertices_main, dtype=bool)
-                        * self.all_widgets[self.selected_shape_type]["pcgTglSize"].getValue()
-                    )
+                    vertices_main = self.env_state.polygon.vertices[self.selected_shape_index] * scale_main
 
                 def _set_single_state_rbody(
                     state,
@@ -760,7 +644,7 @@ class Editor:
 
                 position_delta = position_main - shape_main.position
                 env_state = _set_single_state_rbody(
-                    self.pcg_state.env_state,
+                    self.env_state,
                     parent_container_main,
                     new_density_main,
                     inv_mass_main,
@@ -773,91 +657,15 @@ class Editor:
                     angular_velocity_main,
                     vertices_main,
                 )
-                env_state_max = _set_single_state_rbody(
-                    self.pcg_state.env_state_max,
-                    parent_container_max,
-                    new_density_max,
-                    inv_mass_max,
-                    inv_inertia_max,
-                    friction_max,
-                    position_max,
-                    radius_max,
-                    rotation_max,
-                    velocity_max,
-                    angular_velocity_max,
-                    vertices_max,
-                )
-                env_state_pcg_mask = _set_single_state_rbody(
-                    self.pcg_state.env_state_pcg_mask,
-                    parent_container_pcg_mask,
-                    density_pcg_mask,
-                    density_pcg_mask,
-                    density_pcg_mask,
-                    friction_pcg_mask,
-                    position_pcg_mask,
-                    radius_pcg_mask,
-                    rotation_pcg_mask,
-                    velocity_pcg_mask,
-                    angular_velocity_pcg_mask,
-                    vertices_pcg_mask,
-                )
-
-                # Now, we must also set all of the tied shape's positions
-
-                correct_index = self.selected_shape_index + (
-                    self.static_env_params.num_polygons if self.selected_shape_type == ObjectType.CIRCLE else 0
-                )
-
-                nonzero_indices = set(
-                    jnp.nonzero(self.pcg_state.tied_together[correct_index].at[correct_index].set(False))[0].tolist()
-                )
-                for idx in nonzero_indices:
-                    if idx < self.static_env_params.num_polygons:
-                        env_state = env_state.replace(
-                            polygon=env_state.polygon.replace(
-                                position=env_state.polygon.position.at[idx].set(
-                                    env_state.polygon.position[idx] + position_delta
-                                )
-                            )
-                        )
-                    else:
-                        idx = idx - self.static_env_params.num_polygons
-                        env_state = env_state.replace(
-                            circle=env_state.circle.replace(
-                                position=env_state.circle.position.at[idx].set(
-                                    env_state.circle.position[idx] + position_delta
-                                )
-                            )
-                        )
-
                 if not do_dummy:
-                    self.pcg_state = PCGState(
-                        env_state=env_state,
-                        env_state_max=env_state_max,
-                        env_state_pcg_mask=env_state_pcg_mask,
-                        tied_together=self.pcg_state.tied_together,
-                    )
+                    self.env_state = env_state
 
             if do_dummy or self.selected_shape_type == ObjectType.JOINT:  # rjoint
                 speed_main = self.all_widgets[ObjectType.JOINT]["sldSpeed"].getValue()
-                speed_max = self.all_widgets[ObjectType.JOINT]["sldMaxSpeed"].getValue()
-                speed_pcg_mask = self.all_widgets[ObjectType.JOINT]["pcgTglSpeed"].getValue()
-                if speed_pcg_mask:
-                    speed_main, speed_max = min(speed_main, speed_max), max(speed_main, speed_max)
 
                 power_main = self.all_widgets[ObjectType.JOINT]["sldPower"].getValue()
-                power_max = self.all_widgets[ObjectType.JOINT]["sldMaxPower"].getValue()
-                power_pcg_mask = self.all_widgets[ObjectType.JOINT]["pcgTglPower"].getValue()
-                if power_pcg_mask:
-                    power_main, power_max = min(power_main, power_max), max(power_main, power_max)
 
                 motor_binding_val_min = int(self.all_widgets[ObjectType.JOINT]["sldColour"].getValue())
-                motor_binding_val_max = int(self.all_widgets[ObjectType.JOINT]["sldMaxColour"].getValue())
-                colour_pcg_mask = self.all_widgets[ObjectType.JOINT]["pcgTglColour"].getValue()
-                if colour_pcg_mask:
-                    motor_binding_val_min, motor_binding_val_max = min(
-                        motor_binding_val_min, motor_binding_val_max
-                    ), max(motor_binding_val_min, motor_binding_val_max)
 
                 auto_motor_val = self.all_widgets[ObjectType.JOINT]["tglAutoMotor"].getValue()
                 joint_limits_val = self.all_widgets[ObjectType.JOINT]["tglJointLimits"].getValue()
@@ -888,35 +696,17 @@ class Editor:
                     return state
 
                 env_state = _set_single_state_joint(
-                    self.pcg_state.env_state,
+                    self.env_state,
                     speed_main,
                     power_main,
                     motor_binding_val_min,
                 )
 
-                env_state_max = _set_single_state_joint(
-                    self.pcg_state.env_state_max,
-                    speed_max,
-                    power_max,
-                    motor_binding_val_max,
-                )
-
-                env_state_pcg_mask = _set_single_state_joint(
-                    self.pcg_state.env_state_pcg_mask, speed_pcg_mask, power_pcg_mask, colour_pcg_mask
-                )
                 if not do_dummy:
-                    self.pcg_state = self.pcg_state.replace(
-                        env_state=env_state,
-                        env_state_max=env_state_max,
-                        env_state_pcg_mask=env_state_pcg_mask,
-                    )
+                    self.env_state = env_state
 
             if do_dummy or self.selected_shape_type == ObjectType.THRUSTER:  # thruster
                 power_main = self.all_widgets[ObjectType.THRUSTER]["sldPower"].getValue()
-                power_max = self.all_widgets[ObjectType.THRUSTER]["sldMaxPower"].getValue()
-                power_pcg_mask = self.all_widgets[ObjectType.THRUSTER]["pcgTglPower"].getValue()
-                if power_pcg_mask:
-                    power_main, power_max = min(power_main, power_max), max(power_main, power_max)
 
                 def _set_single_state_thruster(state, power):
                     return state.replace(
@@ -928,18 +718,12 @@ class Editor:
                         ),
                     )
 
-                env_state = _set_single_state_thruster(self.pcg_state.env_state, power_main)
-                env_state_max = _set_single_state_thruster(self.pcg_state.env_state_max, power_max)
-                env_state_pcg_mask = _set_single_state_thruster(self.pcg_state.env_state_pcg_mask, power_pcg_mask)
+                env_state = _set_single_state_thruster(self.env_state, power_main)
                 if not do_dummy:
-                    self.pcg_state = self.pcg_state.replace(
-                        env_state=env_state,
-                        env_state_max=env_state_max,
-                        env_state_pcg_mask=env_state_pcg_mask,
-                    )
+                    self.env_state = env_state
 
     # flag2
-    def _put_state_values_into_gui(self, pcg_state=None):
+    def _put_state_values_into_gui(self, env_state=None):
         def _set_toggle_val(toggle, val):
             if toggle.getValue() != val:
                 toggle.toggle()
@@ -954,79 +738,38 @@ class Editor:
             slider.colour = (255, 0, 0)
             slider.handleColour = (255, 0, 0)
 
-        if pcg_state is None:
+        if env_state is None:
             # state = self.edit_state
             raise ValueError
 
-        def pcg_text(main_val, max_val, pcg_mask):
-            if pcg_mask:
-                return f"{main_val:.2f} - {max_val:.2f}"
-            else:
-                return f"{main_val:.2f}"
+        def make_text(main_val):
+            return f"{main_val:.2f}"
 
         # global ones
-        gravity_pcg_mask = pcg_state.env_state_pcg_mask.gravity[1]
-        self.all_widgets[None]["lblGravity"].setText(
-            f"Gravity: {pcg_text(pcg_state.env_state.gravity[1], pcg_state.env_state_max.gravity[1], pcg_state.env_state_pcg_mask.gravity[1])}"
-        )
-        self.all_widgets[None]["sldGravity"].setValue(pcg_state.env_state.gravity[1])
-        self.all_widgets[None]["sldMaxGravity"].setValue(pcg_state.env_state_max.gravity[1])
-        if not gravity_pcg_mask:
-            _disable_slider(self.all_widgets[None]["sldMaxGravity"])
-        else:
-            _enable_slider(self.all_widgets[None]["sldMaxGravity"])
+        self.all_widgets[None]["lblGravity"].setText(f"Gravity: {make_text(env_state.gravity[1])}")
+        self.all_widgets[None]["sldGravity"].setValue(env_state.gravity[1])
 
         if self.edit_shape_mode != EditMode.SELECT or self.selected_shape_index < 0:
             return
 
-        obj_main = select_object(pcg_state.env_state, self.selected_shape_type, self.selected_shape_index)
-        obj_max = select_object(pcg_state.env_state_max, self.selected_shape_type, self.selected_shape_index)
-        obj_pcg_mask = select_object(pcg_state.env_state_pcg_mask, self.selected_shape_type, self.selected_shape_index)
+        obj_main = select_object(env_state, self.selected_shape_type, self.selected_shape_index)
 
         if len(self.all_selected_shapes) > 1:
-            indices_to_use = self._get_selected_shape_global_indices()
-            are_all_tied = pcg_state.tied_together[indices_to_use.min(), indices_to_use].all()
-            _set_toggle_val(self.all_widgets["TIE_TOGETHER"]["tglTieTogether"], are_all_tied)
+            assert False
 
         if self.selected_shape_type == ObjectType.JOINT:
-            self.all_widgets[ObjectType.JOINT]["lblSpeed"].setText(
-                f"Speed: {pcg_text(obj_main.motor_speed, obj_max.motor_speed, obj_pcg_mask.motor_speed)}"
-            )
+            self.all_widgets[ObjectType.JOINT]["lblSpeed"].setText(f"Speed: {make_text(obj_main.motor_speed)}")
             self.all_widgets[ObjectType.JOINT]["sldSpeed"].setValue(obj_main.motor_speed)
-            self.all_widgets[ObjectType.JOINT]["sldMaxSpeed"].setValue(obj_max.motor_speed)
-            _set_toggle_val(self.all_widgets[ObjectType.JOINT]["pcgTglSpeed"], obj_pcg_mask.motor_speed)
-            if obj_pcg_mask.motor_speed:
-                _enable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxSpeed"])
-            else:
-                _disable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxSpeed"])
 
-            self.all_widgets[ObjectType.JOINT]["lblPower"].setText(
-                f"Power: {pcg_text(obj_main.motor_power, obj_max.motor_power, obj_pcg_mask.motor_power)}"
-            )
+            self.all_widgets[ObjectType.JOINT]["lblPower"].setText(f"Power: {make_text(obj_main.motor_power)}")
             self.all_widgets[ObjectType.JOINT]["sldPower"].setValue(obj_main.motor_power)
-            self.all_widgets[ObjectType.JOINT]["sldMaxPower"].setValue(obj_max.motor_power)
-            _set_toggle_val(self.all_widgets[ObjectType.JOINT]["pcgTglPower"], obj_pcg_mask.motor_power)
-            if obj_pcg_mask.motor_power:
-                _enable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxPower"])
-            else:
-                _disable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxPower"])
 
             self.all_widgets[ObjectType.JOINT]["lblColour"].setText(
-                f"Colour: {pcg_state.env_state.motor_bindings[self.selected_shape_index]}"
+                f"Colour: {env_state.motor_bindings[self.selected_shape_index]}"
             )
             self.all_widgets[ObjectType.JOINT]["sldColour"].setValue(
-                pcg_state.env_state.motor_bindings[self.selected_shape_index]
+                env_state.motor_bindings[self.selected_shape_index]
             )
-
-            self.all_widgets[ObjectType.JOINT]["sldMaxColour"].setValue(
-                pcg_state.env_state_max.motor_bindings[self.selected_shape_index]
-            )
-
-            colour_pcg_mask = pcg_state.env_state_pcg_mask.motor_bindings[self.selected_shape_index]
-            if not colour_pcg_mask:
-                _disable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxColour"])
-            else:
-                _enable_slider(self.all_widgets[ObjectType.JOINT]["sldMaxColour"])
 
             self.all_widgets[ObjectType.JOINT]["lblJointLimits"].setText(
                 f"Joint Limits: {obj_main.motor_has_joint_limits}"
@@ -1053,10 +796,10 @@ class Editor:
                     self.all_widgets[self.selected_shape_type][f"sld{k.title()}"].handleColour = (0, 0, 0)
 
             self.all_widgets[ObjectType.JOINT]["lblAutoMotor"].setText(
-                f"Auto: {pcg_state.env_state.motor_auto[self.selected_shape_index]}"
+                f"Auto: {env_state.motor_auto[self.selected_shape_index]}"
             )
             widget_is_auto_motor = self.all_widgets[ObjectType.JOINT]["tglAutoMotor"].getValue()
-            if pcg_state.env_state.motor_auto[self.selected_shape_index] != widget_is_auto_motor:  # Update the toggle
+            if env_state.motor_auto[self.selected_shape_index] != widget_is_auto_motor:  # Update the toggle
                 self.all_widgets[ObjectType.JOINT]["tglAutoMotor"].toggle()
 
             self.all_widgets[ObjectType.JOINT]["lblIsFixedJoint"].setText(f"Fixed: {obj_main.is_fixed_joint}")
@@ -1071,21 +814,13 @@ class Editor:
 
         elif self.selected_shape_type == ObjectType.THRUSTER:
             # thruster
-            self.all_widgets[ObjectType.THRUSTER]["lblPower"].setText(
-                f"Power: {pcg_text(obj_main.power, obj_max.power, obj_pcg_mask.power)}"
-            )
+            self.all_widgets[ObjectType.THRUSTER]["lblPower"].setText(f"Power: {make_text(obj_main.power)}")
             self.all_widgets[ObjectType.THRUSTER]["sldPower"].setValue(obj_main.power)
-            self.all_widgets[ObjectType.THRUSTER]["sldMaxPower"].setValue(obj_max.power)
-            _set_toggle_val(self.all_widgets[ObjectType.THRUSTER]["pcgTglPower"], obj_pcg_mask.power)
-            if obj_pcg_mask.power:
-                _enable_slider(self.all_widgets[ObjectType.THRUSTER]["sldMaxPower"])
-            else:
-                _disable_slider(self.all_widgets[ObjectType.THRUSTER]["sldMaxPower"])
             self.all_widgets[ObjectType.THRUSTER]["sldColour"].setValue(
-                pcg_state.env_state.thruster_bindings[self.selected_shape_index]
+                env_state.thruster_bindings[self.selected_shape_index]
             )
             self.all_widgets[ObjectType.THRUSTER]["lblColour"].setText(
-                f"Colour: {pcg_state.env_state.thruster_bindings[self.selected_shape_index]}"
+                f"Colour: {env_state.thruster_bindings[self.selected_shape_index]}"
             )
 
         elif self.selected_shape_type in [ObjectType.POLYGON, ObjectType.CIRCLE]:
@@ -1094,46 +829,26 @@ class Editor:
             # Position
             # We use the mask for position_x for the entire position vector
             self.all_widgets[self.selected_shape_type]["lblPosition_X"].setText(
-                f"Position X: {pcg_text(obj_main.position[0], obj_max.position[0], obj_pcg_mask.position[0])}"
+                f"Position X: {make_text(obj_main.position[0])}"
             )
             self.all_widgets[self.selected_shape_type]["sldPosition_X"].setValue(obj_main.position[0])
-            self.all_widgets[self.selected_shape_type]["sldMaxPosition_X"].setValue(obj_max.position[0])
-            _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglPosition_X"], obj_pcg_mask.position[0])
 
             self.all_widgets[self.selected_shape_type]["lblPosition_Y"].setText(
-                f"Position Y: {pcg_text(obj_main.position[1], obj_max.position[1], obj_pcg_mask.position[0])}"
+                f"Position Y: {make_text(obj_main.position[1])}"
             )
             self.all_widgets[self.selected_shape_type]["sldPosition_Y"].setValue(obj_main.position[1])
-            self.all_widgets[self.selected_shape_type]["sldMaxPosition_Y"].setValue(obj_max.position[1])
-
-            if obj_pcg_mask.position[0]:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxPosition_X"])
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxPosition_Y"])
-            else:
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxPosition_X"])
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxPosition_Y"])
 
             # Velocity
             # We use the mask for velocity_x for the entire velocity vector
             self.all_widgets[self.selected_shape_type]["lblVelocity_X"].setText(
-                f"Velocity X: {pcg_text(obj_main.velocity[0], obj_max.velocity[0], obj_pcg_mask.velocity[0])}"
+                f"Velocity X: {make_text(obj_main.velocity[0])}"
             )
             self.all_widgets[self.selected_shape_type]["sldVelocity_X"].setValue(obj_main.velocity[0])
-            self.all_widgets[self.selected_shape_type]["sldMaxVelocity_X"].setValue(obj_max.velocity[0])
-            _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglVelocity_X"], obj_pcg_mask.velocity[0])
 
             self.all_widgets[self.selected_shape_type]["lblVelocity_Y"].setText(
-                f"Velocity Y: {pcg_text(obj_main.velocity[1], obj_max.velocity[1], obj_pcg_mask.velocity[0])}"
+                f"Velocity Y: {make_text(obj_main.velocity[1])}"
             )
             self.all_widgets[self.selected_shape_type]["sldVelocity_Y"].setValue(obj_main.velocity[1])
-            self.all_widgets[self.selected_shape_type]["sldMaxVelocity_Y"].setValue(obj_max.velocity[1])
-
-            if obj_pcg_mask.velocity[0]:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxVelocity_X"])
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxVelocity_Y"])
-            else:
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxVelocity_X"])
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxVelocity_Y"])
 
             # Density
             is_fixated = obj_main.inverse_mass == 0
@@ -1146,38 +861,20 @@ class Editor:
                 else:
                     raise ValueError
 
-            density_main = _calc_density(pcg_state.env_state)
-            density_max = _calc_density(pcg_state.env_state_max)
-            density_pcg_mask = obj_pcg_mask.inverse_mass
+            density_main = _calc_density(env_state)
 
-            self.all_widgets[self.selected_shape_type]["lblDensity"].setText(
-                f"Density: {pcg_text(density_main, density_max, density_pcg_mask)}"
-            )
+            self.all_widgets[self.selected_shape_type]["lblDensity"].setText(f"Density: {make_text(density_main)}")
             self.all_widgets[self.selected_shape_type]["sldDensity"].setValue(density_main)
-            self.all_widgets[self.selected_shape_type]["sldMaxDensity"].setValue(density_max)
-            _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglDensity"], density_pcg_mask)
             if is_fixated:
                 _disable_slider(self.all_widgets[self.selected_shape_type]["sldDensity"])
             else:
                 _enable_slider(self.all_widgets[self.selected_shape_type]["sldDensity"])
 
-            if is_fixated or (not density_pcg_mask):
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxDensity"])
-            else:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxDensity"])
-
             # Friction
             self.all_widgets[self.selected_shape_type]["lblFriction"].setText(
-                f"Friction: {pcg_text(obj_main.friction, obj_max.friction, obj_pcg_mask.friction)}"
+                f"Friction: {make_text(obj_main.friction)}"
             )
             self.all_widgets[self.selected_shape_type]["sldFriction"].setValue(obj_main.friction)
-            self.all_widgets[self.selected_shape_type]["sldMaxFriction"].setValue(obj_max.friction)
-            _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglFriction"], obj_pcg_mask.friction)
-
-            if not obj_pcg_mask.friction:
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxFriction"])
-            else:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxFriction"])
 
             # Restitution
             self.all_widgets[self.selected_shape_type]["lblRestitution"].setText(
@@ -1187,31 +884,15 @@ class Editor:
 
             # Rotation
             self.all_widgets[self.selected_shape_type]["lblRotation"].setText(
-                f"Rotation: {pcg_text(obj_main.rotation, obj_max.rotation, obj_pcg_mask.rotation)}"
+                f"Rotation: {make_text(obj_main.rotation)}"
             )
             self.all_widgets[self.selected_shape_type]["sldRotation"].setValue(obj_main.rotation)
-            self.all_widgets[self.selected_shape_type]["sldMaxRotation"].setValue(obj_max.rotation)
-            _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglRotation"], obj_pcg_mask.rotation)
-
-            if not obj_pcg_mask.rotation:
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxRotation"])
-            else:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxRotation"])
 
             # Angular_Velocity
             self.all_widgets[self.selected_shape_type]["lblAngular_Velocity"].setText(
-                f"Angular_Velocity: {pcg_text(obj_main.angular_velocity, obj_max.angular_velocity, obj_pcg_mask.angular_velocity)}"
+                f"Angular_Velocity: {make_text(obj_main.angular_velocity)}"
             )
             self.all_widgets[self.selected_shape_type]["sldAngular_Velocity"].setValue(obj_main.angular_velocity)
-            self.all_widgets[self.selected_shape_type]["sldMaxAngular_Velocity"].setValue(obj_max.angular_velocity)
-            _set_toggle_val(
-                self.all_widgets[self.selected_shape_type]["pcgTglAngular_Velocity"], obj_pcg_mask.angular_velocity
-            )
-
-            if not obj_pcg_mask.angular_velocity:
-                _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxAngular_Velocity"])
-            else:
-                _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxAngular_Velocity"])
 
             # Collision mode
             self.all_widgets[self.selected_shape_type]["lblCollidability"].setText(
@@ -1221,9 +902,9 @@ class Editor:
 
             # Shape role
             if self.selected_shape_type == ObjectType.POLYGON:
-                shape_role = pcg_state.env_state.polygon_shape_roles[self.selected_shape_index]
+                shape_role = env_state.polygon_shape_roles[self.selected_shape_index]
             else:
-                shape_role = pcg_state.env_state.circle_shape_roles[self.selected_shape_index]
+                shape_role = env_state.circle_shape_roles[self.selected_shape_index]
 
             self.all_widgets[self.selected_shape_type]["sldRole"].setValue(shape_role)
             self.all_widgets[self.selected_shape_type]["lblRole"].setText(f"Role: {shape_role}")
@@ -1236,34 +917,14 @@ class Editor:
 
             # Radius
             if self.selected_shape_type == ObjectType.CIRCLE:
-                self.all_widgets[self.selected_shape_type]["lblRadius"].setText(
-                    f"Radius: {pcg_text(obj_main.radius, obj_max.radius, obj_pcg_mask.radius)}"
-                )
+                self.all_widgets[self.selected_shape_type]["lblRadius"].setText(f"Radius: {make_text(obj_main.radius)}")
                 self.all_widgets[self.selected_shape_type]["sldRadius"].setValue(obj_main.radius)
-                self.all_widgets[self.selected_shape_type]["sldMaxRadius"].setValue(obj_max.radius)
-                _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglRadius"], obj_pcg_mask.radius)
-
-                if not obj_pcg_mask.radius:
-                    _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxRadius"])
-                else:
-                    _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxRadius"])
 
             elif self.selected_shape_type == ObjectType.POLYGON:
                 size_main = jnp.abs(obj_main.vertices).max()
-                size_max = jnp.abs(obj_max.vertices).max()
-                size_pcg_mask = obj_pcg_mask.vertices.any()
 
-                self.all_widgets[self.selected_shape_type]["lblSize"].setText(
-                    f"Size: {pcg_text(size_main, size_max, size_pcg_mask)}"
-                )
+                self.all_widgets[self.selected_shape_type]["lblSize"].setText(f"Size: {make_text(size_main)}")
                 self.all_widgets[self.selected_shape_type]["sldSize"].setValue(size_main)
-                self.all_widgets[self.selected_shape_type]["sldMaxSize"].setValue(size_max)
-                _set_toggle_val(self.all_widgets[self.selected_shape_type]["pcgTglSize"], size_pcg_mask)
-
-                if not size_pcg_mask:
-                    _disable_slider(self.all_widgets[self.selected_shape_type]["sldMaxSize"])
-                else:
-                    _enable_slider(self.all_widgets[self.selected_shape_type]["sldMaxSize"])
 
     def _render_side_panel(self):
         arr = jnp.ones((self.side_panel_width, self.static_env_params.screen_dim[1], 3)) * (
@@ -1280,14 +941,8 @@ class Editor:
         slider_step=0.05,
         font_size=18,
         is_toggle=False,
-        is_pcg=False,
-        add_pcg_toggle=True,
     ):
         Wl = round(self.W * 0.7)
-        pcg_lbl = None
-        pcg_toggle = None
-        widget_max = None
-
         label = TextBox(
             self.screen_surface,
             self.MARGIN,
@@ -1314,33 +969,7 @@ class Editor:
                 step=slider_step,
             )
 
-            if is_pcg:
-                widget_max = Slider(
-                    self.screen_surface,
-                    self.MARGIN,
-                    start_y + 50,
-                    Wl,
-                    13,
-                    min=slider_min,
-                    max=slider_max,
-                    step=slider_step,
-                )
-
-                pcg_lbl = TextBox(
-                    self.screen_surface,
-                    self.MARGIN + Wl + 30,
-                    start_y,
-                    60,
-                    20,
-                    fontSize=font_size,
-                    margin=0,
-                    placeholderText="PCG",
-                    font=pygame.font.SysFont("sans-serif", font_size),
-                )
-                if add_pcg_toggle:
-                    pcg_toggle = Toggle(self.screen_surface, Wl + 80, start_y + 23, 20, 13)
-
-        return label, widget, (pcg_toggle, pcg_lbl, widget_max)
+        return label, widget
 
     def _setup_side_panel(self):
 
@@ -1349,26 +978,17 @@ class Editor:
 
         # global values
         G = {}
-        gravity_label, gravity_slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
-            150, "Gravity", -20.0, 0.0, 0.2, is_pcg=True
-        )
+        gravity_label, gravity_slider = self.make_label_and_slider(150, "Gravity", -20.0, 0.01, 0.2)
         G["lblGravity"] = gravity_label
         G["sldGravity"] = gravity_slider
-        G["sldMaxGravity"] = slider_max
-        G["pcgLblGravity"] = pcg_lbl
-        G["pcgTglGravity"] = pcg_toggle
 
         # thruster values
         T = {}
-        thruster_power_label, thruster_power_slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
-            150, "Power", slider_max=3.0, is_pcg=True
-        )
+        thruster_power_label, thruster_power_slider = self.make_label_and_slider(150, "Power", slider_max=3.0)
         T["lblPower"] = thruster_power_label
         T["sldPower"] = thruster_power_slider
-        T["sldMaxPower"] = slider_max
-        T["pcgLblPower"] = pcg_lbl
-        T["pcgTglPower"] = pcg_toggle
-        thruster_colour_label, thruster_colour_slider, _ = self.make_label_and_slider(
+
+        thruster_colour_label, thruster_colour_slider = self.make_label_and_slider(
             250, "Colour", 0, self.static_env_params.num_thruster_bindings - 1, 1
         )
         T["lblColour"] = thruster_colour_label
@@ -1376,7 +996,7 @@ class Editor:
 
         # joints
         D = {}
-        for i, (name, (mini, maxi, step), is_pcg) in enumerate(
+        for i, (name, (mini, maxi, step)) in enumerate(
             zip(
                 ["speed", "power", "colour", "min_rotation", "max_rotation"],
                 [
@@ -1386,37 +1006,31 @@ class Editor:
                     (-180, 180, 5),
                     (-180, 180, 5),
                 ],
-                [True, True, True, False, False],
             )
         ):
-            label, slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
+            label, slider = self.make_label_and_slider(
                 150 + 80 * i,
                 f"Motor {name.title()}",
                 slider_min=mini,
                 slider_max=maxi,
                 slider_step=step,
-                is_pcg=is_pcg,
             )
             D["lbl" + name.title()] = label
             D["sld" + name.title()] = slider
-            if is_pcg:
-                D["sldMax" + name.title()] = slider_max
-                D["pcgLbl" + name.title()] = pcg_lbl
-                D["pcgTgl" + name.title()] = pcg_toggle
 
-        label, toggle, _ = self.make_label_and_slider(150 + 80 * 5, "Joint Limits", is_toggle=True)
+        label, toggle = self.make_label_and_slider(150 + 80 * 5, "Joint Limits", is_toggle=True)
         D["lblJointLimits"] = label
         D["tglJointLimits"] = toggle
 
-        label, toggle, _ = self.make_label_and_slider(150 + 80 * 6, "Auto", is_toggle=True)
+        label, toggle = self.make_label_and_slider(150 + 80 * 6, "Auto", is_toggle=True)
         D["lblAutoMotor"] = label
         D["tglAutoMotor"] = toggle
 
-        label, toggle, _ = self.make_label_and_slider(150 + 80 * 7, "Fixed", is_toggle=True)
+        label, toggle = self.make_label_and_slider(150 + 80 * 7, "Fixed", is_toggle=True)
         D["lblIsFixedJoint"] = label
         D["tglIsFixedJoint"] = toggle
 
-        label, toggle, _ = self.make_label_and_slider(150 + 80 * 8, "Motor On", is_toggle=True)
+        label, toggle = self.make_label_and_slider(150 + 80 * 8, "Motor On", is_toggle=True)
         D["lblIsMotorOn"] = label
         D["tglIsMotorOn"] = toggle
 
@@ -1425,7 +1039,7 @@ class Editor:
             # rigidbodies
             total_toggles = 0
             total_non_toggles = 0
-            for i, (name, bounds, is_pcg, add_pcg_toggle) in enumerate(
+            for i, (name, bounds) in enumerate(
                 zip(
                     [
                         "position_x",
@@ -1453,28 +1067,22 @@ class Editor:
                         (0, 2, 1),
                         (0, 3, 1),
                     ],
-                    [True, True, True, True, True, True, True, True, False, False, False],
-                    [True, False, True, True, False, True, True, True, False, False, False],
                 )
             ):
                 location = 50 + 80 * total_toggles + 40 * total_non_toggles
-                label, slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
-                    location, name.title(), *bounds, is_pcg=is_pcg, add_pcg_toggle=add_pcg_toggle
+                label, slider = self.make_label_and_slider(
+                    location,
+                    name.title(),
+                    *bounds,
                 )
-                total_toggles += is_pcg
-                total_non_toggles += not is_pcg
+                total_toggles += 0
+                total_non_toggles += 1
                 D_rigid["lbl" + name.title()] = label
                 D_rigid["sld" + name.title()] = slider
 
-                if is_pcg:
-                    D_rigid["sldMax" + name.title()] = slider_max
-                    if add_pcg_toggle:
-                        D_rigid["pcgLbl" + name.title()] = pcg_lbl
-                        D_rigid["pcgTgl" + name.title()] = pcg_toggle
-
             location = 50 + 80 * total_toggles + 40 * total_non_toggles
             # toggles:
-            label, toggle, _ = self.make_label_and_slider(location, "Fixate", is_toggle=True)
+            label, toggle = self.make_label_and_slider(location, "Fixate", is_toggle=True)
             D_rigid["lblFixate"] = label
             D_rigid["tglFixate"] = toggle
 
@@ -1482,31 +1090,27 @@ class Editor:
 
         # Circle extras
         D_circle, location = _create_rigid_body_base_gui()
-        label, slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
-            location + 40, "Radius", slider_min=0.1, slider_max=1.0, slider_step=0.02, is_pcg=True, add_pcg_toggle=True
+        label, slider = self.make_label_and_slider(
+            location + 40,
+            "Radius",
+            slider_min=0.1,
+            slider_max=1.0,
+            slider_step=0.02,
         )
         D_circle["lblRadius"] = label
         D_circle["sldRadius"] = slider
-        D_circle["sldMaxRadius"] = slider_max
-        D_circle["pcgLblRadius"] = pcg_lbl
-        D_circle["pcgTglRadius"] = pcg_toggle
 
         # Polygon extras
         D_poly, location = _create_rigid_body_base_gui()
-        label, slider, (pcg_toggle, pcg_lbl, slider_max) = self.make_label_and_slider(
-            location + 40, "Size", slider_min=0.1, slider_max=2.0, slider_step=0.02, is_pcg=True, add_pcg_toggle=True
+        label, slider = self.make_label_and_slider(
+            location + 40,
+            "Size",
+            slider_min=0.1,
+            slider_max=2.0,
+            slider_step=0.02,
         )
         D_poly["lblSize"] = label
         D_poly["sldSize"] = slider
-        D_poly["sldMaxSize"] = slider_max
-        D_poly["pcgLblSize"] = pcg_lbl
-        D_poly["pcgTglSize"] = pcg_toggle
-
-        label, toggle, _ = self.make_label_and_slider(150 + 80 * 5, "Tie Positions Together", is_toggle=True)
-        TIE_TOGETHER = {
-            "lblTieTogether": label,
-            "tglTieTogether": toggle,
-        }
 
         self.all_widgets = {
             ObjectType.THRUSTER: T,
@@ -1527,7 +1131,6 @@ class Editor:
             ObjectType.POLYGON: D_poly,
             ObjectType.CIRCLE: D_circle,
             None: G,
-            "TIE_TOGETHER": TIE_TOGETHER,
         }
 
         self._hide_all_widgets()
@@ -1574,7 +1177,7 @@ class Editor:
 
     def edit(self):
         self.rng, _rng = jax.random.split(self.rng)
-        pcg_state = self.pcg_state
+        env_state = self.env_state
 
         left_click = False
         right_click = False
@@ -1594,37 +1197,26 @@ class Editor:
                         save_pickle(filename, self.last_played_level)
                         print(f"Saved last sampled level to {filename}")
                 elif event.key == pygame.K_s and (pygame.key.get_mods() & pygame.KMOD_CTRL):
-                    pcg_state = self._reset_select_shape(pcg_state)
+                    env_state = self._reset_select_shape(env_state)
                     filename = prompt_file(save=True)
                     if filename:
                         if filename.endswith(".json"):
-                            export_env_state_to_json(
-                                filename, pcg_state.env_state, self.static_env_params, self.env_params
-                            )
+                            export_env_state_to_json(filename, env_state, self.static_env_params, self.env_params)
                         elif not filename.endswith(".pcg.pkl"):
                             filename += ".pcg.pkl"
-                            save_pickle(filename, pcg_state)
+                            save_pickle(filename, env_state)
                         print(f"Saved PCG state to {filename}")
                 elif event.key == pygame.K_o and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                     filename = prompt_file(save=False)
                     if filename:
-                        self._reset_select_shape(pcg_state)
-                        if filename.endswith(".pcg.pkl"):
-                            pcg_state = load_pcg_state_pickle(filename)
-                            pcg_state = expand_pcg_state(pcg_state, self.static_env_params)
-                            print(f"Loaded PCG state from {filename}")
-                        elif filename.endswith(".level.pkl"):
-                            env_state = load_world_state_pickle(filename)
-                            pcg_state = env_state_to_pcg_state(env_state)
-                            print(f"Converted level state to PCG state from {filename}")
-                        elif filename.endswith(".json"):
+                        self._reset_select_shape(env_state)
+                        if filename.endswith(".json"):
                             env_state, new_static_env_params, new_env_params = load_from_json_file(filename)
                             self._update_params(new_static_env_params, new_env_params)
-                            pcg_state = env_state_to_pcg_state(env_state)
                     self._reset_triangles()
                 elif event.key == pygame.K_n and (pygame.key.get_mods() & pygame.KMOD_CTRL):
-                    self._reset_select_shape(pcg_state)
-                    pcg_state = new_pcg_env(self.static_env_params)
+                    self._reset_select_shape(env_state)
+                    env_state = new_env(self.static_env_params)
                     self._reset_triangles()
                 else:
                     keys.append(event.key)
@@ -1637,7 +1229,7 @@ class Editor:
                     right_click = True
 
             if event.type == pygame.MOUSEWHEEL:
-                pcg_state = self._handle_scroll_wheel(pcg_state, event.y)
+                env_state = self._handle_scroll_wheel(env_state, event.y)
 
         if self.selected_shape_index == -1:
             num = get_numeric_key_pressed(self.pygame_events)
@@ -1646,7 +1238,7 @@ class Editor:
 
         # We have to do these checks outside the loop, otherwise they get triggered multiple times per key press.
         if pygame.key.get_mods() & pygame.KMOD_SHIFT:
-            state = pcg_state.env_state
+            state = env_state
             if pygame.K_m in keys_up_this_frame:
                 state = self.mutate_world(_rng, state, 1)
             if pygame.K_c in keys_up_this_frame:
@@ -1679,60 +1271,60 @@ class Editor:
                 state = self.mutate_change_shape_rotation(
                     _rng, state, self.env_params, self.static_env_params, self.ued_params
                 )
-            pcg_state = pcg_state.replace(env_state=state)
+            env_state = state
 
         if pygame.K_p in keys_up_this_frame:
             global myrng
             myrng, _rng = jax.random.split(myrng)
             # use the same rng
-            pcg_state = permute_pcg_state(_rng, pcg_state, self.static_env_params)
+            env_state = permute_state(_rng, env_state, self.static_env_params)
         if self.edit_shape_mode == EditMode.SELECT:  # select a shape
-            pcg_state = self._edit_select_shape(pcg_state, left_click, right_click, keys)
-            self._put_state_values_into_gui(pcg_state)
-            pcg_state = self._select_shape_keyboard_shortcuts(pcg_state, left_click, keys)
+            env_state = self._edit_select_shape(env_state, left_click, right_click, keys)
+            self._put_state_values_into_gui(env_state)
+            env_state = self._select_shape_keyboard_shortcuts(env_state, left_click, keys)
         else:
-            pcg_state = self._reset_select_shape(pcg_state)  # don't highlight
-            self._put_state_values_into_gui(pcg_state)
+            env_state = self._reset_select_shape(env_state)  # don't highlight
+            self._put_state_values_into_gui(env_state)
             self._show_correct_widgets(None)
 
         if self.edit_shape_mode != EditMode.ADD_TRIANGLE or not self.creating_shape:
             self.num_triangle_clicks = 0
 
         if self.edit_shape_mode == EditMode.ADD_CIRCLE:
-            pcg_state = self._edit_circle(pcg_state, left_click, right_click)
+            env_state = self._edit_circle(env_state, left_click, right_click)
         elif self.edit_shape_mode == EditMode.ADD_RECTANGLE:
-            pcg_state = self._edit_rect(pcg_state, left_click, right_click)
+            env_state = self._edit_rect(env_state, left_click, right_click)
         elif self.edit_shape_mode == EditMode.ADD_JOINT:
-            pcg_state = self._edit_joint(pcg_state, left_click, right_click)
+            env_state = self._edit_joint(env_state, left_click, right_click)
         elif self.edit_shape_mode == EditMode.ADD_TRIANGLE:
-            pcg_state = self._edit_triangle(pcg_state, left_click, right_click)
+            env_state = self._edit_triangle(env_state, left_click, right_click)
         elif self.edit_shape_mode == EditMode.ADD_THRUSTER:
-            pcg_state = self._edit_thruster(pcg_state, left_click, right_click)
+            env_state = self._edit_thruster(env_state, left_click, right_click)
 
-        pcg_state = pcg_state.replace(
-            env_state=recompute_global_joint_positions(
-                pcg_state.env_state.replace(
-                    collision_matrix=calculate_collision_matrix(self.static_env_params, pcg_state.env_state.joint),
-                ),
-                self.static_env_params,
+        env_state = recompute_global_joint_positions(
+            env_state.replace(
+                collision_matrix=calculate_collision_matrix(self.static_env_params, env_state.joint),
             ),
-            env_state_pcg_mask=pcg_state.env_state_pcg_mask.replace(
-                collision_matrix=jnp.zeros_like(pcg_state.env_state_pcg_mask.collision_matrix)
-            ),
+            self.static_env_params,
         )
-        return pcg_state
+        return env_state
 
     def _update_params(self, new_static_env_params: StaticEnvParams, new_env_params: EnvParams):
         self.static_env_params = new_static_env_params.replace(
             frame_skip=self.config["frame_skip"], downscale=self.config["downscale"]
         )
         self.env_params = new_env_params
-        env = make_kinetix_env_from_name("Kinetix-Entity-MultiDiscrete-v1", static_env_params=self.static_env_params)
-        self.env = AutoResetWrapper(env, make_reset_function(self.static_env_params))
+        self.env = make_kinetix_env(
+            self.config,
+            self.env_params,
+            self.static_env_params,
+            observation_type=ObservationType.SYMBOLIC_ENTITY,
+            action_type=ActionType.MULTI_DISCRETE,
+            reset_func=make_reset_function(self.static_env_params),
+        )
         self._setup_rendering(self.static_env_params, self.env_params)
 
-    def _discard_shape_being_created(self, pcg_state):
-        env_state = pcg_state.env_state
+    def _discard_shape_being_created(self, env_state):
         if self.creating_shape:
             if self.edit_shape_mode == EditMode.ADD_CIRCLE:
                 env_state = env_state.replace(
@@ -1750,13 +1342,13 @@ class Editor:
 
         self.creating_shape = False
 
-        return pcg_state.replace(env_state=env_state)
+        return env_state
 
-    def _handle_scroll_wheel(self, pcg_state, y):
+    def _handle_scroll_wheel(self, env_state, y):
         if y == 0:
-            return pcg_state
+            return env_state
 
-        state = self._discard_shape_being_created(pcg_state)
+        state = self._discard_shape_being_created(env_state)
 
         self.edit_shape_mode = EditMode((self.edit_shape_mode.value + y) % len(EditMode))
 
@@ -1832,22 +1424,22 @@ class Editor:
         t = jnp.arange(self.static_env_params.num_thrusters)[state.thruster.object_index == shape_index]
         return jnp.concatenate([r_a, r_b], axis=0), t
 
-    def _edit_thruster(self, pcg_state: PCGState, left_click: bool, right_click: bool):
-        if not self.creating_shape and (1 - pcg_state.env_state.thruster.active.astype(int)).sum() == 0:
+    def _edit_thruster(self, env_state: EnvState, left_click: bool, right_click: bool):
+        if not self.creating_shape and (1 - env_state.thruster.active.astype(int)).sum() == 0:
             if not right_click:
-                return pcg_state
+                return env_state
 
         thruster_pos = self._get_mouse_position_world_space()
         idx = -1
-        for ri in self._get_polygons_on_mouse(pcg_state.env_state):
-            r = jax.tree.map(lambda x: x[ri], pcg_state.env_state.polygon)
+        for ri in self._get_polygons_on_mouse(env_state):
+            r = jax.tree.map(lambda x: x[ri], env_state.polygon)
             thruster_pos = snap_to_polygon_center_line(r, thruster_pos)
             relative_pos = jnp.matmul(rmat(r.rotation).transpose((1, 0)), thruster_pos - r.position)
             idx = ri
             break
         if idx == -1:
-            for ci in self._get_circles_on_mouse(pcg_state.env_state):
-                c = jax.tree.map(lambda x: x[ci], pcg_state.env_state.circle)
+            for ci in self._get_circles_on_mouse(env_state):
+                c = jax.tree.map(lambda x: x[ci], env_state.circle)
                 thruster_pos = snap_to_center(c, thruster_pos)
                 thruster_pos = snap_to_circle_center_line(c, thruster_pos)
                 relative_pos = thruster_pos - c.position
@@ -1860,8 +1452,8 @@ class Editor:
                 if idx >= 0:
                     self.creating_shape = True
                     self.creating_shape_position = thruster_pos
-                    self.creating_shape_index = jnp.argmin(pcg_state.env_state.thruster.active)
-                    shape = select_shape(pcg_state.env_state, idx, self.static_env_params)
+                    self.creating_shape_index = jnp.argmin(env_state.thruster.active)
+                    shape = select_shape(env_state, idx, self.static_env_params)
 
                     def _add_thruster_to_state(state):
                         state = state.replace(
@@ -1883,27 +1475,21 @@ class Editor:
                         )
                         return state
 
-                    pcg_state = pcg_state.replace(
-                        env_state=_add_thruster_to_state(pcg_state.env_state),
-                        env_state_max=_add_thruster_to_state(pcg_state.env_state_max),
-                    )
+                    env_state = _add_thruster_to_state(env_state)
         elif right_click:
-            for ti in self._get_thrusters_on_mouse(pcg_state.env_state):
+            for ti in self._get_thrusters_on_mouse(env_state):
 
                 def _remove_thruster_from_state(state):
                     return state.replace(
                         thruster=state.thruster.replace(active=state.thruster.active.at[ti].set(False))
                     )
 
-                return pcg_state.replace(
-                    env_state=_remove_thruster_from_state(pcg_state.env_state),
-                    env_state_max=_remove_thruster_from_state(pcg_state.env_state_max),
-                )
+                return _remove_thruster_from_state(env_state)
         else:
             if self.creating_shape:
                 curr_pos = self._get_mouse_position_world_space()
 
-                normal = pcg_state.env_state.thruster.relative_position[self.creating_shape_index]
+                normal = env_state.thruster.relative_position[self.creating_shape_index]
                 angle = jnp.arctan2(normal[1], normal[0])
 
                 relative_pos = curr_pos - self.creating_shape_position
@@ -1921,20 +1507,17 @@ class Editor:
                         )
                     )
 
-                pcg_state = pcg_state.replace(
-                    env_state=_update_thruster_rotation(pcg_state.env_state),
-                    env_state_max=_update_thruster_rotation(pcg_state.env_state_max),
-                )
+                env_state = _update_thruster_rotation(env_state)
             else:
                 pass
 
-        return pcg_state
+        return env_state
 
-    def _edit_circle(self, pcg_state: PCGState, left_click: bool, right_click: bool):
+    def _edit_circle(self, env_state: EnvState, left_click: bool, right_click: bool):
         if right_click:
-            for ci in self._get_circles_on_mouse(pcg_state.env_state):
+            for ci in self._get_circles_on_mouse(env_state):
                 attached_j, attached_t = self._get_joints_attached_to_shape(
-                    pcg_state.env_state, ci + self.static_env_params.num_polygons
+                    env_state, ci + self.static_env_params.num_polygons
                 )
 
                 def _remove_circle_from_state(state):
@@ -1944,23 +1527,15 @@ class Editor:
                         thruster=state.thruster.replace(active=state.thruster.active.at[attached_t].set(False)),
                     )
 
-                env_state = _remove_circle_from_state(pcg_state.env_state)
-                env_state_pcg_mask = _remove_circle_from_state(pcg_state.env_state_pcg_mask)
-                env_state_max = _remove_circle_from_state(pcg_state.env_state_max)
-
+                env_state = _remove_circle_from_state(env_state)
                 env_state = env_state.replace(
                     collision_matrix=calculate_collision_matrix(self.static_env_params, env_state.joint)
                 )
 
-                return PCGState(
-                    env_state=env_state,
-                    env_state_pcg_mask=env_state_pcg_mask,
-                    env_state_max=env_state_max,
-                    tied_together=pcg_state.tied_together,
-                )
+                return env_state
 
-        if not self.creating_shape and (1 - pcg_state.env_state.circle.active.astype(int)).sum() == 0:
-            return pcg_state
+        if not self.creating_shape and (1 - env_state.circle.active.astype(int)).sum() == 0:
+            return env_state
 
         radius = jnp.linalg.norm(self._get_mouse_position_world_space() - self.create_shape_position)
         radius = jnp.clip(radius, 5.0 / self.env_params.pixels_per_unit, self.static_env_params.max_shape_size / 2)
@@ -1984,8 +1559,7 @@ class Editor:
 
         if left_click:
             if self.creating_shape:
-                env_state = _add_circle(pcg_state.env_state, False)
-                env_state_max = _add_circle(pcg_state.env_state_max, False)
+                env_state = _add_circle(env_state, False)
 
                 env_state = recalculate_mass_and_inertia(
                     env_state,
@@ -1993,31 +1567,20 @@ class Editor:
                     env_state.polygon_densities,
                     env_state.circle_densities,
                 )
-                env_state_max = recalculate_mass_and_inertia(
-                    env_state_max,
-                    self.static_env_params,
-                    env_state.polygon_densities,
-                    env_state.circle_densities,
-                )
-
-                pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
 
                 self.creating_shape = False
             else:
-                self.creating_shape_index = jnp.argmin(pcg_state.env_state.circle.active)
+                self.creating_shape_index = jnp.argmin(env_state.circle.active)
                 self.create_shape_position = self._get_mouse_position_world_space()
                 self.creating_shape = True
 
         else:
             if self.creating_shape:
-                env_state = _add_circle(pcg_state.env_state, True)
-                env_state_max = _add_circle(pcg_state.env_state_max, True)
-
-                pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
+                env_state = _add_circle(env_state, True)
             else:
                 pass
 
-        return pcg_state
+        return env_state
 
     def _get_polygons_on_mouse(self, state, n_vertices=None):
         # n_vertices=None selects both triangles and quads
@@ -2033,25 +1596,17 @@ class Editor:
 
             mpos = rmat(-polygon.rotation) @ (mouse_pos - polygon.position)
 
-            def _signed_line_distance(a, b, c):
-                return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-
-            inside = True
-            for fi in range(polygon.n_vertices):
-                v1 = polygon.vertices[fi]
-                v2 = polygon.vertices[(fi + 1) % polygon.n_vertices]
-                if _signed_line_distance(mpos, v1, v2) > 0:
-                    inside = False
-
-            if inside:
+            ii = jnp.arange(polygon.n_vertices)
+            ii2 = (ii + 1) % polygon.n_vertices
+            distances = jax.vmap(_mouse_dist_to_vertices, (None, 0, 0, None))(mpos, ii, ii2, polygon.vertices)
+            if not (distances > 0).any():
                 ris.append(ri)
-
         return ris
 
-    def _edit_rect(self, pcg_state: PCGState, left_click: bool, right_click: bool):
+    def _edit_rect(self, env_state: EnvState, left_click: bool, right_click: bool):
         if right_click:
-            for ri in self._get_polygons_on_mouse(pcg_state.env_state, n_vertices=4):
-                attached_j, attached_t = self._get_joints_attached_to_shape(pcg_state.env_state, ri)
+            for ri in self._get_polygons_on_mouse(env_state, n_vertices=4):
+                attached_j, attached_t = self._get_joints_attached_to_shape(env_state, ri)
 
                 def _remove_rect_from_state(state):
                     state = state.replace(
@@ -2065,23 +1620,16 @@ class Editor:
 
                     return state
 
-                env_state = _remove_rect_from_state(pcg_state.env_state)
-                env_state_max = _remove_rect_from_state(pcg_state.env_state_max)
-                env_state_pcg_mask = _remove_rect_from_state(pcg_state.env_state_pcg_mask)
+                env_state = _remove_rect_from_state(env_state)
 
                 env_state = env_state.replace(
                     collision_matrix=calculate_collision_matrix(self.static_env_params, env_state.joint)
                 )
 
-                return PCGState(
-                    env_state=env_state,
-                    env_state_max=env_state_max,
-                    env_state_pcg_mask=env_state_pcg_mask,
-                    tied_together=pcg_state.tied_together,
-                )
+                return env_state
 
-        if not self.creating_shape and (1 - pcg_state.env_state.polygon.active.astype(int)).sum() == 0:
-            return pcg_state
+        if not self.creating_shape and (1 - env_state.polygon.active.astype(int)).sum() == 0:
+            return env_state
 
         diff = (self._get_mouse_position_world_space() - self.create_shape_position) / 2
         diff = jnp.clip(
@@ -2116,8 +1664,7 @@ class Editor:
 
         if left_click:
             if self.creating_shape:
-                env_state = _add_rect_to_state(pcg_state.env_state, False)
-                env_state_max = _add_rect_to_state(pcg_state.env_state_max, False)
+                env_state = _add_rect_to_state(env_state, False)
 
                 env_state = recalculate_mass_and_inertia(
                     env_state,
@@ -2125,41 +1672,28 @@ class Editor:
                     env_state.polygon_densities,
                     env_state.circle_densities,
                 )
-                env_state_max = recalculate_mass_and_inertia(
-                    env_state_max,
-                    self.static_env_params,
-                    env_state.polygon_densities,
-                    env_state.circle_densities,
-                )
-
-                pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
 
                 self.creating_shape = False
             else:
-                self.creating_shape_index = jnp.argmin(pcg_state.env_state.polygon.active)
+                self.creating_shape_index = jnp.argmin(env_state.polygon.active)
                 self.create_shape_position = self._get_mouse_position_world_space()
                 self.creating_shape = True
         else:
             if self.creating_shape:
-                env_state = _add_rect_to_state(pcg_state.env_state, True)
-                env_state_max = _add_rect_to_state(pcg_state.env_state_max, True)
+                env_state = _add_rect_to_state(env_state, True)
 
-                pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
-            else:
-                pass
-
-        return pcg_state
+        return env_state
 
     def _reset_triangles(self):
         self.triangle_order = jnp.array([0, 1, 2])
         self.num_triangle_clicks = 0
         self.creating_shape = False
 
-    def _edit_triangle(self, pcg_state: PCGState, left_click: bool, right_click: bool):
+    def _edit_triangle(self, env_state: EnvState, left_click: bool, right_click: bool):
         if right_click:
             self.num_triangle_clicks = 0
-            for ri in self._get_polygons_on_mouse(pcg_state.env_state, n_vertices=3):
-                attached_r, attached_f = self._get_joints_attached_to_shape(pcg_state.env_state, ri)
+            for ri in self._get_polygons_on_mouse(env_state, n_vertices=3):
+                attached_r, attached_f = self._get_joints_attached_to_shape(env_state, ri)
 
                 def _remove_triangle_from_state(state):
                     state = state.replace(
@@ -2172,25 +1706,16 @@ class Editor:
 
                     return state
 
-                env_state = _remove_triangle_from_state(pcg_state.env_state)
-                env_state_max = _remove_triangle_from_state(pcg_state.env_state_max)
-                env_state_pcg_mask = _remove_triangle_from_state(pcg_state.env_state_pcg_mask)
+                env_state = _remove_triangle_from_state(env_state)
 
                 env_state = env_state.replace(
                     collision_matrix=calculate_collision_matrix(self.static_env_params, env_state.joint)
                 )
 
-                pcg_state = PCGState(
-                    env_state=env_state,
-                    env_state_max=env_state_max,
-                    env_state_pcg_mask=env_state_pcg_mask,
-                    tied_together=pcg_state.tied_together,
-                )
+                return env_state
 
-                return pcg_state
-
-        if not self.creating_shape and (1 - pcg_state.env_state.polygon.active.astype(int)).sum() == 0:
-            return pcg_state
+        if not self.creating_shape and (1 - env_state.polygon.active.astype(int)).sum() == 0:
+            return env_state
 
         def get_correct_center_two_verts(verts):
             return (jnp.max(verts, axis=0) + jnp.min(verts, axis=0)) / 2
@@ -2212,7 +1737,7 @@ class Editor:
                 order = jnp.concatenate([order, jnp.array([2])])
             return ans, order
 
-        def do_triangle_n_click(pcg_state, how_many_clicks, is_on_a_click=False):
+        def do_triangle_n_click(env_state, how_many_clicks, is_on_a_click=False):
             n = how_many_clicks
             # if we must keep them clockwise all the time, then the one we edit / move around may have varying indices.
             current_index_to_change = self.triangle_order[n]
@@ -2222,16 +1747,16 @@ class Editor:
 
             # Get the new vertex and clip its position
             new_tentative_vert = (
-                self._get_mouse_position_world_space() - pcg_state.env_state.polygon.position[self.creating_shape_index]
+                self._get_mouse_position_world_space() - env_state.polygon.position[self.creating_shape_index]
             )
             new_tentative_vert = jnp.clip(
                 new_tentative_vert,
-                jnp.max(pcg_state.env_state.polygon.vertices[self.creating_shape_index, idxs_to_allow], axis=0)
+                jnp.max(env_state.polygon.vertices[self.creating_shape_index, idxs_to_allow], axis=0)
                 - self.static_env_params.max_shape_size * 0.8,
-                jnp.min(pcg_state.env_state.polygon.vertices[self.creating_shape_index, idxs_to_allow], axis=0)
+                jnp.min(env_state.polygon.vertices[self.creating_shape_index, idxs_to_allow], axis=0)
                 + self.static_env_params.max_shape_size * 0.8,
             )
-            new_verts = pcg_state.env_state.polygon.vertices.at[self.creating_shape_index, current_index_to_change].set(
+            new_verts = env_state.polygon.vertices.at[self.creating_shape_index, current_index_to_change].set(
                 new_tentative_vert
             )
             new_center_two = get_correct_center_two_verts(new_verts[self.creating_shape_index, : n + 1])
@@ -2251,49 +1776,36 @@ class Editor:
             self.triangle_order = self.triangle_order[new_permutation]
             new_verts = new_verts.at[self.creating_shape_index, : n + 1].set(ordered_vertices)
 
-            env_state = pcg_state.env_state.replace(
-                polygon=pcg_state.env_state.polygon.replace(
+            env_state = env_state.replace(
+                polygon=env_state.polygon.replace(
                     vertices=new_verts,
-                    position=pcg_state.env_state.polygon.position.at[self.creating_shape_index].add(sign * new_center),
-                    n_vertices=pcg_state.env_state.polygon.n_vertices.at[self.creating_shape_index].set(n + 1),
-                ),
-            )
-            env_state_max = pcg_state.env_state_max.replace(
-                polygon=pcg_state.env_state_max.polygon.replace(
-                    vertices=new_verts,
-                    position=pcg_state.env_state_max.polygon.position.at[self.creating_shape_index].add(
-                        sign * new_center
-                    ),
-                    n_vertices=pcg_state.env_state_max.polygon.n_vertices.at[self.creating_shape_index].set(n + 1),
+                    position=env_state.polygon.position.at[self.creating_shape_index].add(sign * new_center),
+                    n_vertices=env_state.polygon.n_vertices.at[self.creating_shape_index].set(n + 1),
                 ),
             )
 
-            pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
-
-            return pcg_state
+            return env_state
 
         if left_click:
             if self.creating_shape:
                 assert 3 > self.num_triangle_clicks > 0
                 if self.num_triangle_clicks == 1:
-                    pcg_state = do_triangle_n_click(pcg_state, 1, is_on_a_click=True)
+                    env_state = do_triangle_n_click(env_state, 1, is_on_a_click=True)
                     self.num_triangle_clicks += 1
                 else:  # this finishes it
-                    pcg_state = do_triangle_n_click(pcg_state, 2, is_on_a_click=True)
+                    env_state = do_triangle_n_click(env_state, 2, is_on_a_click=True)
                     self.creating_shape = False
                     self.num_triangle_clicks = 0
-                    pcg_state = pcg_state.replace(
-                        env_state=recalculate_mass_and_inertia(
-                            pcg_state.env_state,
-                            self.static_env_params,
-                            pcg_state.env_state.polygon_densities,
-                            pcg_state.env_state.circle_densities,
-                        )
+                    env_state = recalculate_mass_and_inertia(
+                        env_state,
+                        self.static_env_params,
+                        env_state.polygon_densities,
+                        env_state.circle_densities,
                     )
 
             else:
                 self.triangle_order = jnp.array([0, 1, 2])
-                self.creating_shape_index = jnp.argmin(pcg_state.env_state.polygon.active)
+                self.creating_shape_index = jnp.argmin(env_state.polygon.active)
                 self.create_shape_position = self._get_mouse_position_world_space()
                 self.creating_shape = True
                 self.num_triangle_clicks = 1
@@ -2319,30 +1831,27 @@ class Editor:
 
                     return state
 
-                pcg_state = pcg_state.replace(
-                    env_state=_add_triangle_to_state(pcg_state.env_state),
-                    env_state_max=_add_triangle_to_state(pcg_state.env_state_max),
-                )
+                env_state = _add_triangle_to_state(env_state)
 
         elif self.creating_shape:
             assert 1 <= self.num_triangle_clicks <= 2
-            pcg_state = do_triangle_n_click(
-                pcg_state, self.num_triangle_clicks, is_on_a_click=self.num_triangle_clicks == 1
+            env_state = do_triangle_n_click(
+                env_state, self.num_triangle_clicks, is_on_a_click=self.num_triangle_clicks == 1
             )
 
-        return pcg_state
+        return env_state
 
-    def _edit_joint(self, pcg_state: PCGState, left_click: bool, right_click: bool):
-        if left_click and pcg_state.env_state.joint.active.all():
-            return pcg_state
+    def _edit_joint(self, env_state: EnvState, left_click: bool, right_click: bool):
+        if left_click and env_state.joint.active.all():
+            return env_state
 
         if left_click:
-            joint_index = jnp.argmin(pcg_state.env_state.joint.active)
+            joint_index = jnp.argmin(env_state.joint.active)
             joint_position = self._get_mouse_position_world_space()
             # reverse them so that the joint order and rendering order remains the same.
             # We want the first shape to have a lower index than the second shape, with circles always having higher indices compared to rectangles.
-            circles = self._get_circles_on_mouse(pcg_state.env_state)[::-1]
-            rects = self._get_polygons_on_mouse(pcg_state.env_state)[::-1]
+            circles = self._get_circles_on_mouse(env_state)[::-1]
+            rects = self._get_polygons_on_mouse(env_state)[::-1]
 
             if len(rects) + len(circles) >= 2:
                 r1 = len(rects) >= 1
@@ -2351,8 +1860,8 @@ class Editor:
                 a_index = rects[0] if r1 else circles[0]  # + self.static_env_params.num_polygons
                 b_index = rects[r1 * 1] if r2 else circles[1 - 1 * r1]  # + self.static_env_params.num_polygons
 
-                a_shape = pcg_state.env_state.polygon if r1 else pcg_state.env_state.circle
-                b_shape = pcg_state.env_state.polygon if r2 else pcg_state.env_state.circle
+                a_shape = env_state.polygon if r1 else env_state.circle
+                b_shape = env_state.polygon if r2 else env_state.circle
 
                 a = jax.tree.map(lambda x: x[a_index], a_shape)
                 b = jax.tree.map(lambda x: x[b_index], b_shape)
@@ -2384,45 +1893,33 @@ class Editor:
 
                     return state
 
-                env_state = _add_joint_to_state(pcg_state.env_state)
-                env_state_max = _add_joint_to_state(pcg_state.env_state_max)
+                env_state = _add_joint_to_state(env_state)
 
                 env_state = env_state.replace(
                     collision_matrix=calculate_collision_matrix(self.static_env_params, env_state.joint)
                 )
 
-                pcg_state = pcg_state.replace(env_state=env_state, env_state_max=env_state_max)
+        return env_state
 
-        return pcg_state
-
-    def _reset_select_shape(self, pcg_state):
-        pcg_state = pcg_state.replace(
-            env_state=pcg_state.env_state.replace(
-                polygon_highlighted=jnp.zeros_like(pcg_state.env_state.polygon_highlighted),
-                circle_highlighted=jnp.zeros_like(pcg_state.env_state.circle_highlighted),
-            )
+    def _reset_select_shape(self, env_state):
+        env_state = env_state.replace(
+            polygon_highlighted=jnp.zeros_like(env_state.polygon_highlighted),
+            circle_highlighted=jnp.zeros_like(env_state.circle_highlighted),
         )
+
         self.selected_shape_index = -1
         self.selected_shape_type = ObjectType.POLYGON
         self._hide_all_widgets()
-        return pcg_state
+        return env_state
 
     def _hide_all_widgets(self):
         for widget in self.all_widgets.values():
             for w in widget.values():
                 w.hide()
 
-    def _show_correct_widgets(self, type: ObjectType | None, do_tie_ui: bool = False):
+    def _show_correct_widgets(self, type: ObjectType | None):
         for widget in self.all_widgets["GENERAL"].values():
             widget.show()
-        if do_tie_ui:
-            for widget in self.all_widgets["TIE_TOGETHER"].values():
-                widget.show()
-
-            n = len(self.all_selected_shapes)
-            #  {[int(i) for (i, t) in self.all_selected_shapes]}
-            self.all_widgets["GENERAL"]["lblGeneral"].setText(f"Selected {n} Objects")
-            return
 
         for widget in self.all_widgets[type].values():
             widget.show()
@@ -2431,9 +1928,9 @@ class Editor:
         else:
             self.all_widgets["GENERAL"]["lblGeneral"].setText(f"{type.name} (idx {self.selected_shape_index})")
 
-    def _select_shape_keyboard_shortcuts(self, pcg_state: PCGState, left_click: bool, keys: list[int]):
+    def _select_shape_keyboard_shortcuts(self, env_state: EnvState, left_click: bool, keys: list[int]):
         if left_click:
-            return pcg_state
+            return env_state
         if len(keys) != 0 and self.selected_shape_index != -1:
             s = 1.0
             ang_s = 0.1
@@ -2486,8 +1983,8 @@ class Editor:
             if pygame.K_c in keys and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                 # copy
                 if self.selected_shape_type == ObjectType.POLYGON:  # rect
-                    if not self.pcg_state.env_state.polygon.active.all():
-                        where_to_add = jnp.argmin(pcg_state.env_state.polygon.active)
+                    if not self.env_state.polygon.active.all():
+                        where_to_add = jnp.argmin(env_state.polygon.active)
                         if where_to_add < self.static_env_params.num_polygons:
 
                             def _copy_polygon(state, shift):
@@ -2505,15 +2002,11 @@ class Editor:
                                     )
                                 return state
 
-                            pcg_state = pcg_state.replace(
-                                env_state=_copy_polygon(pcg_state.env_state, shift=True),
-                                env_state_max=_copy_polygon(pcg_state.env_state_max, shift=True),
-                                env_state_pcg_mask=_copy_polygon(pcg_state.env_state_pcg_mask, shift=False),
-                            )
+                            env_state = _copy_polygon(env_state, shift=True)
 
                 elif self.selected_shape_type == ObjectType.CIRCLE:  # circle
-                    if not self.pcg_state.env_state.circle.active.all():
-                        where_to_add = jnp.argmin(pcg_state.env_state.circle.active)
+                    if not self.env_state.circle.active.all():
+                        where_to_add = jnp.argmin(env_state.circle.active)
                         if where_to_add < self.static_env_params.num_circles:
 
                             def _copy_circle(state, shift=True):
@@ -2531,11 +2024,7 @@ class Editor:
                                     )
                                 return state
 
-                            pcg_state = pcg_state.replace(
-                                env_state=_copy_circle(pcg_state.env_state),
-                                env_state_max=_copy_circle(pcg_state.env_state_max),
-                                env_state_pcg_mask=_copy_circle(pcg_state.env_state_pcg_mask, shift=False),
-                            )
+                            env_state = _copy_circle(env_state)
 
             if self.selected_shape_index >= 0:
                 num = get_numeric_key_pressed(self.pygame_events)
@@ -2551,67 +2040,50 @@ class Editor:
                             num % self.static_env_params.num_thruster_bindings
                         )
 
-        return pcg_state
+        return env_state
 
-    def _edit_select_shape(self, pcg_state: PCGState, left_click: bool, right_click: bool, keys: list[int]):
-        def _find_shape(pcg_state):
+    def _edit_select_shape(self, env_state: EnvState, left_click: bool, right_click: bool, keys: list[int]):
+        def _find_shape(env_state):
             found_shape = False
             selected_shape_index, selected_shape_type = -1, ObjectType.POLYGON
-            for ri in self._get_revolute_joints_on_mouse(pcg_state.env_state):
+            for ri in self._get_revolute_joints_on_mouse(env_state):
                 selected_shape_index = ri
                 selected_shape_type = ObjectType.JOINT
                 found_shape = True
                 break
             if not found_shape:
-                for ti in self._get_thrusters_on_mouse(pcg_state.env_state):
+                for ti in self._get_thrusters_on_mouse(env_state):
                     selected_shape_index = ti
                     selected_shape_type = ObjectType.THRUSTER
                     found_shape = True
                     break
             if not found_shape:
-                for ri in self._get_polygons_on_mouse(pcg_state.env_state):
-                    pcg_state = pcg_state.replace(
-                        env_state=pcg_state.env_state.replace(
-                            polygon_highlighted=pcg_state.env_state.polygon_highlighted.at[ri].set(True),
-                        )
+                for ri in self._get_polygons_on_mouse(env_state):
+                    env_state = env_state.replace(
+                        polygon_highlighted=env_state.polygon_highlighted.at[ri].set(True),
                     )
+
                     selected_shape_index = ri
                     selected_shape_type = ObjectType.POLYGON
                     found_shape = True
                     break
             if not found_shape:
-                for ci in self._get_circles_on_mouse(pcg_state.env_state):
-                    pcg_state = pcg_state.replace(
-                        env_state=pcg_state.env_state.replace(
-                            circle_highlighted=pcg_state.env_state.circle_highlighted.at[ci].set(True),
-                        )
+                for ci in self._get_circles_on_mouse(env_state):
+                    env_state = env_state.replace(
+                        circle_highlighted=env_state.circle_highlighted.at[ci].set(True),
                     )
+
                     selected_shape_index = ci
                     selected_shape_type = ObjectType.CIRCLE
                     found_shape = True
                     break
-            return selected_shape_index, selected_shape_type, found_shape, pcg_state
-            if found_shape and self.selected_shape_type in self.all_widgets:
-                self._show_correct_widgets(self.selected_shape_type)
+            return selected_shape_index, selected_shape_type, found_shape, env_state
 
-        # if left and shift
-        if left_click and (pygame.key.get_mods() & pygame.KMOD_SHIFT):
-            # This is trying to select multiple things.
-            idx, type, found, pcg_state = _find_shape(pcg_state)
-            if found:
-                t = (idx, type)
-                if t in self.all_selected_shapes:
-                    self.all_selected_shapes.remove(t)
-                else:
-                    self.all_selected_shapes.append(t)
-
-            self._hide_all_widgets()
-            self._show_correct_widgets(None, do_tie_ui=True)
-        elif left_click:
+        if left_click:
             self.all_selected_shapes = []
             self._hide_all_widgets()
-            pcg_state = self._reset_select_shape(pcg_state)
-            self.selected_shape_index, self.selected_shape_type, found_shape, pcg_state = _find_shape(pcg_state)
+            env_state = self._reset_select_shape(env_state)
+            self.selected_shape_index, self.selected_shape_type, found_shape, env_state = _find_shape(env_state)
             if found_shape:
                 self.all_selected_shapes = [(self.selected_shape_index, self.selected_shape_type)]
                 if self.selected_shape_type in self.all_widgets:
@@ -2619,7 +2091,7 @@ class Editor:
         if self.selected_shape_index < 0:
             self._show_correct_widgets(None)
 
-        return pcg_state
+        return env_state
 
     def render(self, env_state):
         # Clear
@@ -2649,8 +2121,14 @@ def main(config):
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
 
-    env = make_kinetix_env_from_name("Kinetix-Entity-MultiDiscrete-v1", static_env_params=static_env_params)
-    env = AutoResetWrapper(env, make_reset_function(static_env_params))
+    env = make_kinetix_env(
+        config,
+        env_params,
+        static_env_params,
+        observation_type=ObservationType.SYMBOLIC_ENTITY,
+        action_type=ActionType.MULTI_DISCRETE,
+        reset_func=make_reset_function(static_env_params),
+    )
 
     seed = config["seed"]
     print("seed", seed)
@@ -2663,7 +2141,10 @@ def main(config):
     clock = pygame.time.Clock()
     while not editor.is_quit_requested():
         rng, _rng = jax.random.split(rng)
+        s = time.time()
         editor.update(_rng)
+        e = time.time()
+        # print("Took {:4f}s to update".format(e - s))
         clock.tick(config["fps"])
 
 

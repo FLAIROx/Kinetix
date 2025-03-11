@@ -1,56 +1,37 @@
 from functools import partial
-import math
-import os
 
 import chex
 import jax
 import jax.numpy as jnp
-from flax.serialization import to_state_dict
-from jax2d.engine import (
-    calculate_collision_matrix,
-    calc_inverse_mass_polygon,
-    calc_inverse_mass_circle,
-    calc_inverse_inertia_circle,
-    calc_inverse_inertia_polygon,
-    recalculate_mass_and_inertia,
-    select_shape,
-    PhysicsEngine,
-)
-from jax2d.sim_state import SimState, RigidBody, Joint, Thruster
-from jax2d.maths import rmat
+from jax2d.engine import PhysicsEngine
+
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
-from kinetix.environment.ued.distributions import (
-    create_vmapped_filtered_distribution,
-    sample_kinetix_level,
-)
+from kinetix.environment.ued.distributions import create_vmapped_filtered_distribution, sample_kinetix_level
 from kinetix.environment.ued.mutators import (
     make_mutate_change_shape_rotation,
     make_mutate_change_shape_size,
+    mutate_add_connected_shape,
     mutate_add_connected_shape_proper,
     mutate_add_shape,
-    mutate_add_connected_shape,
+    mutate_add_thruster,
+    mutate_change_gravity,
     mutate_change_shape_location,
     mutate_remove_joint,
     mutate_remove_shape,
+    mutate_remove_thruster,
     mutate_swap_role,
     mutate_toggle_fixture,
-    mutate_add_thruster,
-    mutate_remove_thruster,
-    mutate_change_gravity,
 )
 from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.environment.utils import permute_pcg_state
-from kinetix.pcg.pcg import env_state_to_pcg_state, sample_pcg_state
-from kinetix.util.config import generate_ued_params_from_config, generate_params_from_config
-from kinetix.util.saving import get_pcg_state_from_json, load_pcg_state_pickle, load_world_state_pickle, stack_list_of_pytrees, expand_env_state
-from flax import struct
-from kinetix.environment.env import create_empty_env
-from kinetix.util.learning import BASE_DIR, general_eval, get_eval_levels
+from kinetix.environment.utils import create_empty_env
+from kinetix.util.config import generate_params_from_config, generate_ued_params_from_config
+from kinetix.util.learning import get_eval_levels
+from kinetix.util.saving import load_world_state_pickle
 
 
-def make_mutate_env(static_env_params: StaticEnvParams, params: EnvParams, ued_params: UEDParams):
-    mutate_size = make_mutate_change_shape_size(params, static_env_params)
-    mutate_rot = make_mutate_change_shape_rotation(params, static_env_params)
+def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
+    mutate_size = make_mutate_change_shape_size(env_params, static_env_params)
+    mutate_rot = make_mutate_change_shape_rotation(env_params, static_env_params)
 
     def mutate_level(rng, level: EnvState, n=1):
         def inner(carry: tuple[chex.PRNGKey, EnvState], _):
@@ -82,7 +63,7 @@ def make_mutate_env(static_env_params: StaticEnvParams, params: EnvParams, ued_p
 
             def mypartial(f):
                 def inner(rng, level):
-                    return f(rng, level, params, static_env_params, ued_params)
+                    return f(rng, level, env_params, static_env_params, ued_params)
 
                 return inner
 
@@ -140,8 +121,9 @@ def make_create_eval_env():
 
 
 def make_reset_train_function_with_mutations(
-    engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams, config, make_pcg_state=True
+    engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams, config
 ):
+
     ued_params = generate_ued_params_from_config(config)
 
     def reset(rng):
@@ -149,19 +131,17 @@ def make_reset_train_function_with_mutations(
             rng, engine, env_params, static_env_params, ued_params, env_size_name=config["env_size_name"]
         )
 
-        if make_pcg_state:
-            return env_state_to_pcg_state(inner)
-        else:
-            return inner
+        return inner
 
     return reset
 
 
 def make_vmapped_filtered_level_sampler(
-    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, make_pcg_state, env
+    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, env
 ):
     ued_params = generate_ued_params_from_config(config)
 
+    @partial(jax.jit, static_argnums=(1,))
     def reset(rng, n_samples):
         inner = create_vmapped_filtered_distribution(
             rng,
@@ -176,21 +156,14 @@ def make_vmapped_filtered_level_sampler(
             config["env_size_name"],
             config["level_filter_n_steps"],
         )
-        if make_pcg_state:
-            return env_state_to_pcg_state(inner)
-        else:
-            return inner
+        return inner
 
     return reset
 
 
-def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, make_pcg_state=True,
-                                                  is_loading_train_levels=False):
+def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, is_loading_train_levels=False):
     assert len(levels) > 0, "Need to provide at least one level to train on"
-    if config["load_train_levels_legacy"]:
-        ls = [get_pcg_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json"))) for l in levels]
-        v = stack_list_of_pytrees(ls)
-    elif is_loading_train_levels:
+    if is_loading_train_levels:
         v = get_eval_levels(levels, static_env_params)
     else:
         _, static_env_params = generate_params_from_config(
@@ -202,11 +175,6 @@ def make_reset_train_function_with_list_of_levels(config, levels, static_env_par
         rng, _rng, _rng2 = jax.random.split(rng, 3)
         idx = jax.random.randint(_rng, (), 0, len(levels))
         state_to_return = jax.tree.map(lambda x: x[idx], v)
-
-        if config["permute_state_during_training"]:
-            state_to_return = permute_pcg_state(rng, state_to_return, static_env_params)
-        if not make_pcg_state:
-            state_to_return = sample_pcg_state(_rng2, state_to_return, params=None, static_params=static_env_params)
 
         return state_to_return
 
@@ -227,7 +195,6 @@ ALL_MUTATION_FNS = [
 
 
 def test_ued():
-    from kinetix.environment.env import create_empty_env
 
     env_params = EnvParams()
     static_env_params = StaticEnvParams()
@@ -247,3 +214,18 @@ def test_ued():
 
 if __name__ == "__main__":
     test_ued()
+
+
+def make_reset_func_from_config(
+    config, physics_engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams
+):
+    if config["train_level_mode"] == "list":
+        reset_func = make_reset_train_function_with_list_of_levels(
+            config, config["train_levels_list"], static_env_params, is_loading_train_levels=True
+        )
+    elif config["train_level_mode"] == "random":
+        reset_func = make_reset_train_function_with_mutations(physics_engine, env_params, static_env_params, config)
+    else:
+        raise ValueError("Invalid Reset Function Provided")
+
+    return reset_func

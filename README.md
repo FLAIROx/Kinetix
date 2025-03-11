@@ -85,36 +85,36 @@ We find that the agent can zero-shot simple physics problems, but still struggle
 
 # 📜 Basic Usage
 
-Kinetix follows the interfaces established in [gymnax](https://github.com/RobertTLange/gymnax) and [jaxued](https://github.com/DramaCow/jaxued):
+Kinetix follows the interface established in [gymnax](https://github.com/RobertTLange/gymnax):
 
 ```python
 # Use default parameters
 env_params = EnvParams()
-static_env_params = StaticEnvParams()
-ued_params = UEDParams()
 
 # Create the environment
-env = make_kinetix_env_from_args(
-    obs_type="pixels",
-    action_type="multidiscrete",
-    reset_type="replay",
-    static_env_params=static_env_params,
+env = make_kinetix_env(
+    config={"train_level_mode": "random"},
+    observation_type=ObservationType.PIXELS,
+    action_type=ActionType.CONTINUOUS,
+    env_params=env_params,
 )
 
-# Sample a random level
-rng = jax.random.PRNGKey(0)
-rng, _rng = jax.random.split(rng)
-level = sample_kinetix_level(_rng, env.physics_engine, env_params, static_env_params, ued_params)
-
-# Reset the environment state to this level
-rng, _rng = jax.random.split(rng)
-obs, env_state = env.reset_to_level(_rng, level, env_params)
+# Reset the environment state (this resets to a random level)
+rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)
+obs, env_state = env.reset(_rng_reset, env_params)
 
 # Take a step in the environment
-rng, _rng = jax.random.split(rng)
-action = env.action_space(env_params).sample(_rng)
-rng, _rng = jax.random.split(rng)
-obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_params)
+action = env.action_space(env_params).sample(_rng_action)
+obs, env_state, reward, done, info = env.step(_rng_step, env_state, action, env_params)
+
+# Render environment
+renderer = make_render_pixels(env_params, env.static_env_params)
+
+pixels = renderer(env_state)
+
+plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
+plt.show()
+
 ```
 
 
@@ -126,6 +126,9 @@ cd Kinetix
 pip install -e .
 pre-commit install
 ```
+
+> [!TIP]
+> Setting `export JAX_COMPILATION_CACHE_DIR="$HOME/.jax_cache"` in your `~/.bashrc` helps improve usability by caching the jax compiles.
 
 # 🎯 Editor
 We recommend using the [KinetixJS editor](https://kinetix-env.github.io/gallery.html?editor=true), but also provide a native (less polished) Kinetix editor.
@@ -156,8 +159,8 @@ python3 experiments/plr.py
 python3 experiments/ppo.py
 ```
 
-We use [hydra](https://hydra.cc/) for managing our configs.  See the `configs/` folder for all the hydra configs that will be used by default.
-If you want to run experiments with different configurations, you can either edit these configs or pass command line arguments as so:
+We use [hydra](https://hydra.cc/) for managing our configs.  See the `configs/` folder for all the hydra configs that will be used by default, or the [docs](./docs/configs.md).
+If you want to run experiments with different configurations, you can either edit these configs or pass command line arguments as follows:
 
 ```commandline
 python3 experiments/sfl.py model.transformer_depth=8
@@ -199,6 +202,7 @@ python3 experiments/ppo.py train_levels=l eval_env_size=l env_size=l train_level
 
 # ❌ Errata
 - The left wall was erroneously misplaced 5cm to the left in all levels and all experiments in the paper (each level is a square with side lengths of 5 metres). This error has been fixed in the latest version of Jax2D, but we have pinned Kinetix to the old version for consistency and reproducability with the original paper.
+Further improvements have been made, so if you wish to reproduce the paper's results, please use kinetix version 0.1.0, which is tagged on github.
 
 # 🔎 See Also
 - 🌐 [Kinetix.js](https://github.com/Michael-Beukman/Kinetix.js) Kinetix reimplemented in Javascript, with a live demo [here](https://kinetix-env.github.io/gallery.html?editor=true).
@@ -206,16 +210,17 @@ python3 experiments/ppo.py train_levels=l eval_env_size=l env_size=l train_level
 - 👨‍💻 [JaxGL](https://github.com/FLAIROx/JaxGL) The graphics library we made for Kinetix.
 - 📋 [Our Paper](https://arxiv.org/abs/2410.23208) for more details and empirical results.
 
+# Acknowledgements
+Thanks to Thomas Foster, Alex Goldie, Matthew Jackson, Sebastian Towers and Andrei Lupu for useful feedback.
+The permutation invariant MLP model that is now default was added by [Anya Sims](https://github.com/anyasims).
 # 📚 Citation
-Please cite Kinetix it as follows:
+If you use Kinetix in your work, please cite it as follows:
 ```
 @article{matthews2024kinetix,
       title={Kinetix: Investigating the Training of General Agents through Open-Ended Physics-Based Control Tasks}, 
       author={Michael Matthews and Michael Beukman and Chris Lu and Jakob Foerster},
-      year={2024},
-      eprint={2410.23208},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2410.23208}, 
+      booktitle={The Thirteenth International Conference on Learning Representations},
+      year={2025},
+      url={https://arxiv.org/abs/2410.23208}
 }
 ```

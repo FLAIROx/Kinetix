@@ -22,21 +22,14 @@
 
 import functools
 from typing import Any, Callable, Optional, Tuple
-from flax.linen.dtypes import promote_dtype
-
-from flax.linen import initializers
-from flax.linen.linear import default_kernel_init
-from flax.linen.linear import DenseGeneral
-from flax.linen.linear import DotGeneralT
-from flax.linen.linear import PrecisionLike
-from flax.linen.module import compact
-from flax.linen.module import merge_param
-from flax.linen.module import Module
 
 import jax
-from jax import lax
-from jax import random
 import jax.numpy as jnp
+from flax.linen import initializers
+from flax.linen.dtypes import promote_dtype
+from flax.linen.linear import DenseGeneral, DotGeneralT, PrecisionLike, default_kernel_init
+from flax.linen.module import Module, compact, merge_param
+from jax import lax, random
 
 PRNGKey = Any
 Shape = Tuple[int, ...]

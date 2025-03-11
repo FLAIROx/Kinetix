@@ -11,6 +11,6 @@ eval_levels:
     "s/h8_unicycle_balance",
     "s/h2_one_wheel_car",
   ]
-eval_num_attempts: 10
+eval_num_attempts: 20
 eval_freq: 50
 EVAL_ON_SAMPLED: true

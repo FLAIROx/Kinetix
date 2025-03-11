@@ -1,6 +1,7 @@
-from functools import partial
+import os
 import time
 from enum import IntEnum
+from functools import partial
 from typing import Tuple
 
 import chex
@@ -8,63 +9,43 @@ import hydra
 import jax
 import jax.numpy as jnp
 import numpy as np
-from omegaconf import OmegaConf
 import optax
 from flax import core, struct
+from flax.serialization import to_state_dict
 from flax.training.train_state import TrainState as BaseTrainState
-
-import wandb
-from kinetix.environment.ued.distributions import (
-    create_random_starting_distribution,
-)
-from kinetix.environment.ued.ued import (
-    make_mutate_env,
-    make_reset_train_function_with_mutations,
-    make_vmapped_filtered_level_sampler,
-)
-from kinetix.environment.ued.ued import (
-    make_mutate_env,
-    make_reset_train_function_with_list_of_levels,
-    make_reset_train_function_with_mutations,
-)
-from kinetix.util.config import (
-    generate_ued_params_from_config,
-    get_video_frequency,
-    init_wandb,
-    normalise_config,
-    save_data_to_local_file,
-    generate_params_from_config,
-    get_eval_level_groups,
-)
 from jaxued.environments.underspecified_env import EnvState
 from jaxued.level_sampler import LevelSampler
 from jaxued.utils import compute_max_returns, max_mc, positive_value_loss
-from flax.serialization import to_state_dict
+from omegaconf import OmegaConf
 
-import sys
-
-sys.path.append("experiments")
-from kinetix.environment.env import make_kinetix_env_from_name
-from kinetix.environment.env_state import StaticEnvParams
-from kinetix.environment.wrappers import (
-    UnderspecifiedToGymnaxWrapper,
+import wandb
+from kinetix.environment import (
     LogWrapper,
-    DenseRewardWrapper,
-    AutoReplayWrapper,
+    StaticEnvParams,
+    create_random_starting_distribution,
+    make_kinetix_env,
+    make_mutate_env,
+    make_reset_func_from_config,
+    make_vmapped_filtered_level_sampler,
 )
-from kinetix.models import make_network_from_config
-from kinetix.render.renderer_pixels import make_render_pixels
-from kinetix.models.actor_critic import ScannedRNN
-from kinetix.util.learning import (
+from kinetix.models import ScannedRNN, make_network_from_config
+from kinetix.render import make_render_pixels
+from kinetix.util import (
     general_eval,
+    generate_params_from_config,
+    generate_ued_params_from_config,
+    get_eval_level_groups,
     get_eval_levels,
-    no_op_and_random_rollout,
-    sample_trajectories_and_learn,
-)
-from kinetix.util.saving import (
+    get_video_frequency,
+    init_wandb,
     load_train_state_from_wandb_artifact_path,
-    save_model_to_wandb,
+    no_op_and_random_rollout,
+    normalise_config,
+    sample_trajectories_and_learn,
+    save_model,
 )
+
+os.environ["WANDB_DISABLE_SERVICE"] = "True"
 
 
 class UpdateState(IntEnum):
@@ -272,6 +253,7 @@ def main(config=None):
     config["static_env_params"] = to_state_dict(static_env_params)
 
     run = init_wandb(config, my_name)
+    config_for_env = config  # so that enums do not break
     config = wandb.config
     time_prev = time.time()
 
@@ -449,7 +431,7 @@ def main(config=None):
                 "returned_episode_lengths": (info["returned_episode_lengths"] * dones).sum()
                 / jnp.maximum(1, dones.sum()),
                 "max_episode_length": info["returned_episode_lengths"].max(),
-                "levels_played": init_env_state.env_state.env_state,
+                "levels_played": init_env_state.env_state,
                 "episode_return": (info["returned_episode_returns"] * dones).sum() / jnp.maximum(1, dones.sum()),
                 "episode_return_v2": (info["returned_episode_returns"] * info["returned_episode"]).sum()
                 / jnp.maximum(1, info["returned_episode"].sum()),
@@ -470,26 +452,12 @@ def main(config=None):
 
     # Setup the environment.
     def make_env(static_env_params):
-        env = make_kinetix_env_from_name(config["env_name"], static_env_params=static_env_params)
-        env = AutoReplayWrapper(env)
-        env = UnderspecifiedToGymnaxWrapper(env)
-        env = DenseRewardWrapper(env, dense_reward_scale=config["dense_reward_scale"])
-        env = LogWrapper(env)
+        env = LogWrapper(make_kinetix_env(config_for_env, env_params, static_env_params, make_empty_reset_func=True))
         return env
 
     env = make_env(static_env_params)
 
-    if config["train_level_mode"] == "list":
-        sample_random_level = make_reset_train_function_with_list_of_levels(
-            config, config["train_levels_list"], static_env_params, make_pcg_state=False, is_loading_train_levels=True
-        )
-    elif config["train_level_mode"] == "random":
-        sample_random_level = make_reset_train_function_with_mutations(
-            env.physics_engine, env_params, static_env_params, config, make_pcg_state=False
-        )
-    else:
-        raise ValueError(f"Unknown train_level_mode: {config['train_level_mode']}")
-
+    sample_random_level = make_reset_func_from_config(config, env.physics_engine, env_params, static_env_params)
     if config["use_accel"] and config["accel_start_from_empty"]:
 
         def make_sample_random_level():
@@ -512,20 +480,12 @@ def main(config=None):
         sample_random_level = make_sample_random_level()
 
     sample_random_levels = make_vmapped_filtered_level_sampler(
-        sample_random_level, env_params, static_env_params, config, make_pcg_state=False, env=env
+        sample_random_level, env_params, static_env_params, config, env=env
     )
 
-    def generate_world():
-        raise NotImplementedError
-        pass
-
-    def generate_eval_world(rng, env_params, static_env_params, level_idx):
-        # jax.random.split(jax.random.PRNGKey(101), num_levels), env_params, static_env_params, jnp.arange(num_levels)
-
-        raise NotImplementedError
-
     _, eval_static_env_params = generate_params_from_config(
-        config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}
+        config["eval_env_size_true"]
+        | {"frame_skip": config["frame_skip"], "dense_reward_scale": config["dense_reward_scale"]}
     )
     eval_env = make_env(eval_static_env_params)
     ued_params = generate_ued_params_from_config(config)
@@ -568,14 +528,14 @@ def main(config=None):
         init_state = jax.tree.map(lambda x: x[0], sample_random_levels(_rng, 1))
 
         rng, _rng = jax.random.split(rng)
-        obs, _ = env.reset_to_level(_rng, init_state, env_params)
+        obs, _ = env.reset(_rng, env_params, init_state)
         ns = config["num_steps"] * config["outer_rollout_steps"]
         obs = jax.tree.map(
             lambda x: jnp.repeat(jnp.repeat(x[None, ...], config["num_train_envs"], axis=0)[None, ...], ns, axis=0),
             obs,
         )
         init_x = (obs, jnp.zeros((ns, config["num_train_envs"]), dtype=jnp.bool_))
-        network = make_network_from_config(env, env_params, config)
+        network = make_network_from_config(env, env_params, config_for_env)
         rng, _rng = jax.random.split(rng)
         network_params = network.init(_rng, ScannedRNN.initialize_carry(config["num_train_envs"]), init_x)
 
@@ -632,7 +592,6 @@ def main(config=None):
                 train_state,
                 config["load_from_checkpoint"],
                 load_only_params=config["load_only_params"],
-                legacy=config["load_legacy_checkpoint"],
             )
         return train_state
 
@@ -655,8 +614,8 @@ def main(config=None):
             # Reset
             rng, rng_levels, rng_reset = jax.random.split(rng, 3)
             new_levels = sample_random_levels(rng_levels, config["num_train_envs"])
-            init_obs, init_env_state = jax.vmap(env.reset_to_level, in_axes=(0, 0, None))(
-                jax.random.split(rng_reset, config["num_train_envs"]), new_levels, env_params
+            init_obs, init_env_state = jax.vmap(env.reset, in_axes=(0, None, 0))(
+                jax.random.split(rng_reset, config["num_train_envs"]), env_params, new_levels
             )
             init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
             # Rollout
@@ -702,9 +661,7 @@ def main(config=None):
                 num_dr_updates=train_state.num_dr_updates + 1,
                 dr_last_level_batch=new_levels,
                 dr_last_level_batch_scores=scores,
-                dr_last_rollout_batch=jax.tree.map(
-                    lambda x: x[:, 0], (rollout_states.env_state.env_state.env_state, dones)
-                ),
+                dr_last_rollout_batch=jax.tree.map(lambda x: x[:, 0], (rollout_states.env_state, dones)),
             )
             return (rng, train_state), metrics
 
@@ -719,8 +676,8 @@ def main(config=None):
             sampler, (level_inds, levels) = level_sampler.sample_replay_levels(
                 sampler, rng_levels, config["num_train_envs"]
             )
-            init_obs, init_env_state = jax.vmap(env.reset_to_level, in_axes=(0, 0, None))(
-                jax.random.split(rng_reset, config["num_train_envs"]), levels, env_params
+            init_obs, init_env_state = jax.vmap(env.reset, in_axes=(0, None, 0))(
+                jax.random.split(rng_reset, config["num_train_envs"]), env_params, levels
             )
             init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
             (
@@ -768,9 +725,7 @@ def main(config=None):
                 num_replay_updates=train_state.num_replay_updates + 1,
                 replay_last_level_batch=levels,
                 replay_last_level_batch_scores=scores,
-                replay_last_rollout_batch=jax.tree.map(
-                    lambda x: x[:, 0], (rollout_states.env_state.env_state.env_state, dones)
-                ),
+                replay_last_rollout_batch=jax.tree.map(lambda x: x[:, 0], (rollout_states.env_state, dones)),
             )
             return (rng, train_state), metrics
 
@@ -788,8 +743,8 @@ def main(config=None):
             child_levels = jax.vmap(mutate_world, (0, 0, None))(
                 jax.random.split(rng_mutate, config["num_train_envs"]), parent_levels, config["num_edits"]
             )
-            init_obs, init_env_state = jax.vmap(env.reset_to_level, in_axes=(0, 0, None))(
-                jax.random.split(rng_reset, config["num_train_envs"]), child_levels, env_params
+            init_obs, init_env_state = jax.vmap(env.reset, in_axes=(0, None, 0))(
+                jax.random.split(rng_reset, config["num_train_envs"]), env_params, child_levels
             )
 
             init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
@@ -838,9 +793,7 @@ def main(config=None):
                 num_mutation_updates=train_state.num_mutation_updates + 1,
                 mutation_last_level_batch=child_levels,
                 mutation_last_level_batch_scores=scores,
-                mutation_last_rollout_batch=jax.tree.map(
-                    lambda x: x[:, 0], (rollout_states.env_state.env_state.env_state, dones)
-                ),
+                mutation_last_rollout_batch=jax.tree.map(lambda x: x[:, 0], (rollout_states.env_state, dones)),
             )
             return (rng, train_state), metrics
 
@@ -936,8 +889,9 @@ def main(config=None):
             eval_learn = _compute_eval_learnability(eval_dones, eval_rewards, eval_infos)
             # Collect Metrics
             eval_returns = cum_rewards.mean(axis=0)  # (num_eval_levels,)
-            eval_solves = (eval_infos["returned_episode_solved"] * eval_dones).sum(axis=1) / jnp.maximum(
-                1, eval_dones.sum(axis=1)
+            mask = jnp.arange(env_params.max_timesteps)[None, ..., None] < episode_lengths[:, None, :]
+            eval_solves = (eval_infos["returned_episode_solved"] * eval_dones * mask).sum(axis=1) / jnp.maximum(
+                1, (eval_dones * mask).sum(axis=1)
             )
             eval_solves = eval_solves.mean(axis=0)
             metrics["eval_returns"] = eval_returns
@@ -953,17 +907,18 @@ def main(config=None):
                     eval_on_dr_levels, (0, None)
                 )(jax.random.split(rng_eval, config["eval_num_attempts"]), train_state)
 
+                mask_dr = jnp.arange(env_params.max_timesteps)[None, ..., None] < episode_lengths_dr[:, None, :]
                 eval_dr_returns = cum_rewards_dr.mean(axis=0).mean()
                 eval_dr_eplen = episode_lengths_dr.mean(axis=0).mean()
 
                 my_eval_dones = infos_dr["returned_episode"]
-                eval_dr_solves = (infos_dr["returned_episode_solved"] * my_eval_dones).sum(axis=1) / jnp.maximum(
-                    1, my_eval_dones.sum(axis=1)
-                )
+                eval_dr_solves = (infos_dr["returned_episode_solved"] * my_eval_dones * mask_dr).sum(
+                    axis=1
+                ) / jnp.maximum(1, (my_eval_dones * mask_dr).sum(axis=1))
 
-                metrics["eval_dr_returns"] = eval_dr_returns
-                metrics["eval_dr_eplen"] = eval_dr_eplen
-                metrics["eval_dr_solve_rates"] = eval_dr_solves
+                metrics["eval/mean_eval_return_sampled"] = eval_dr_returns
+                metrics["eval/mean_eval_eplen_sampled"] = eval_dr_eplen
+                metrics["eval/mean_eval_solve_sampled"] = eval_dr_solves
             return metrics, states, episode_lengths, cum_rewards
 
         @jax.jit
@@ -977,9 +932,7 @@ def main(config=None):
             # And one attempt
             states = jax.tree_util.tree_map(lambda x: x[:, :], states)
             episode_lengths = episode_lengths[:]
-            images = jax.vmap(jax.vmap(render_fn_eval))(
-                states.env_state.env_state.env_state
-            )  # (num_steps, num_eval_levels, ...)
+            images = jax.vmap(jax.vmap(render_fn_eval))(states.env_state)  # (num_steps, num_eval_levels, ...)
             frames = images.transpose(
                 0, 1, 4, 2, 3
             )  # WandB expects color channel before image dimensions when dealing with animations for some reason
@@ -1110,7 +1063,7 @@ def main(config=None):
                 * int(config["outer_rollout_steps"])
             )
             # save_params_to_wandb(train_state.params, steps, config)
-            save_model_to_wandb(train_state, steps, config)
+            save_model(train_state, steps, config)
 
     def train_eval_and_checkpoint_step(runner_state, _):
         runner_state, metrics = jax.lax.scan(
@@ -1132,9 +1085,8 @@ def main(config=None):
         xs=jnp.arange((config["num_updates"]) // (config["checkpoint_save_freq"])),
     )
 
-    if config["save_path"] is not None:
-        # save_params_to_wandb(runner_state[1].params, config["total_timesteps"], config)
-        save_model_to_wandb(runner_state[1], config["total_timesteps"], config, is_final=True)
+    if config["save_policy"]:
+        save_model(runner_state[1], config["total_timesteps"], config, is_final=True, save_to_wandb=config["use_wandb"])
 
     return runner_state[1]
 

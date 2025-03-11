@@ -11,10 +11,13 @@ defaults:
   - model:
     - model-base
     - model-transformer
+    - model-perm-invariant-mlp
   - _self_
 
 
 eval:
-  eval_freq: 40
+  eval_freq: 64
+misc:
+  video_frequency: 2
 
 seed: 0

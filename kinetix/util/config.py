@@ -3,20 +3,19 @@ import datetime
 import gzip
 import json
 import os
+from collections import defaultdict
 from hashlib import md5
+from typing import List, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from numpy import isin
-from kinetix.environment.ued.ued_state import UEDParams
 from omegaconf import OmegaConf
-from pandas import isna
-from typing import List, Tuple
+
 import wandb
 from kinetix.environment.env_state import EnvParams, StaticEnvParams
-from collections import defaultdict
-
+from kinetix.environment.ued.ued_state import UEDParams
+from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.util.saving import load_from_json_file
 
 
@@ -39,7 +38,7 @@ def generate_params_from_config(config):
         return env_params, static_env_params.replace(
             frame_skip=config["frame_skip"],
         )
-    env_params = EnvParams()
+    env_params = EnvParams().replace(dense_reward_scale=config["dense_reward_scale"])
 
     static_env_params = StaticEnvParams().replace(
         num_polygons=config["num_polygons"],
@@ -103,9 +102,16 @@ def normalise_config(config, name, editor_config=False):
             assert kk not in config, kk
             config[kk] = vv
 
+    config["observation_type_str"] = config["observation_type"]
+    config["observation_type"] = ObservationType.from_string(config["observation_type"])
+    config["action_type_str"] = config["action_type"]
+    config["action_type"] = ActionType.from_string(config["action_type"])
     if not editor_config:
+        config[
+            "env_name"
+        ] = f"Kinetix-{config['observation_type_str'].title().replace('_', '')}-{config['action_type_str'].title().replace('_', '')}"
         config["eval_env_size_true"] = config["eval_env_size"]
-        if config["num_train_envs"] == 2048 and "Pixels" in config["env_name"]:
+        if config["num_train_envs"] == 2048 and config["observation_type"] == ObservationType.PIXELS:
             config["num_train_envs"] = 512
         if "SFL" in name and config["env_size_name"] in ["m", "l"]:
             config["eval_num_attempts"] = 6  # to avoid a very weird XLA bug.

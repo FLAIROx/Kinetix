@@ -1,48 +1,17 @@
-from functools import partial
-import json
 import os
 import re
-import time
-from enum import IntEnum
+from functools import partial
 from typing import Tuple
 
 import chex
 import jax
 import jax.numpy as jnp
-import numpy as np
-import optax
-import orbax.checkpoint as ocp
-from flax import core, struct
-from flax.training.train_state import TrainState as BaseTrainState
-
-import wandb
-from jaxued.environments.underspecified_env import EnvParams, EnvState, Observation, UnderspecifiedEnv
-from jaxued.level_sampler import LevelSampler
-from jaxued.utils import compute_max_returns, max_mc, positive_value_loss
-
-from kinetix.environment.env import PixelObservations, make_kinetix_env_from_name
-from kinetix.environment.env_state import StaticEnvParams
-from kinetix.environment.utils import permute_pcg_state
-from kinetix.environment.wrappers import (
-    UnderspecifiedToGymnaxWrapper,
-    LogWrapper,
-    DenseRewardWrapper,
-    AutoReplayWrapper,
-)
-from kinetix.models import make_network_from_config
-from kinetix.pcg.pcg import env_state_to_pcg_state
-from kinetix.render.renderer_pixels import make_render_pixels
-from kinetix.models.actor_critic import ScannedRNN
-from kinetix.util.saving import (
-    expand_pcg_state,
-    get_pcg_state_from_json,
-    load_pcg_state_pickle,
-    load_world_state_pickle,
-    stack_list_of_pytrees,
-    import_env_state_from_json,
-    load_from_json_file,
-)
 from flax.training.train_state import TrainState
+from jaxued.environments.underspecified_env import EnvParams, EnvState, Observation, UnderspecifiedEnv
+
+from kinetix.environment.utils import permute_state
+from kinetix.models.actor_critic import ScannedRNN
+from kinetix.util.saving import expand_env_state, get_env_state_from_json, stack_list_of_pytrees
 
 BASE_DIR = "worlds"
 
@@ -61,14 +30,17 @@ DEFAULT_EVAL_LEVELS = [
 def get_eval_levels(eval_levels, static_env_params):
     should_permute = [".permute" in l for l in eval_levels]
     eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
-    ls = [get_pcg_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json"))) for l in eval_levels]
-    ls = [expand_pcg_state(l, static_env_params) for l in ls]
+    ls = [
+        get_env_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json")))
+        for l in eval_levels
+    ]
+    ls = [expand_env_state(l, static_env_params) for l in ls]
     new_ls = []
     rng = jax.random.PRNGKey(0)
     for sp, l in zip(should_permute, ls):
         rng, _rng = jax.random.split(rng)
         if sp:
-            l = permute_pcg_state(_rng, l, static_env_params)
+            l = permute_state(_rng, l, static_env_params)
         new_ls.append(l)
     return stack_list_of_pytrees(new_ls)
 
@@ -110,8 +82,12 @@ def evaluate_rnn(  # from jaxued
         hstate, pi, _ = train_state.apply_fn(train_state.params, hstate, x)
         action = pi.sample(seed=rng_action).squeeze(0)
 
-        obs, next_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
-            jax.random.split(rng_step, num_levels), state, action, env_params
+        obs, next_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
+            jax.random.split(rng_step, num_levels),
+            state,
+            action,
+            env_params,
+            init_env_state,  # use this to reset to the init env state, keyword arguments are not easily vmappable
         )
 
         next_mask = mask & ~done
@@ -160,8 +136,8 @@ def general_eval(
     It returns (states, cum_rewards, episode_lengths), with shapes (num_steps, num_eval_levels, ...), (num_eval_levels,), (num_eval_levels,)
     """
     rng, rng_reset = jax.random.split(rng)
-    init_obs, init_env_state = jax.vmap(eval_env.reset_to_level, (0, 0, None))(
-        jax.random.split(rng_reset, num_levels), levels, env_params
+    init_obs, init_env_state = jax.vmap(eval_env.reset, (0, None, 0))(
+        jax.random.split(rng_reset, num_levels), env_params, levels
     )
     init_hstate = ScannedRNN.initialize_carry(num_levels)
     (states, rewards, done_idx, episode_lengths, infos), (dones, reward) = evaluate_rnn(
@@ -274,8 +250,8 @@ def sample_trajectories_rnn(
         log_prob = pi.log_prob(action)
         value, action, log_prob = jax.tree.map(lambda x: x.squeeze(0), (value, action, log_prob))
 
-        next_obs, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
-            jax.random.split(rng_step, num_envs), env_state, action, env_params
+        next_obs, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
+            jax.random.split(rng_step, num_envs), env_state, action, env_params, init_env_state
         )
 
         carry = (rng, train_state, hstate, next_obs, env_state, done)
@@ -519,8 +495,8 @@ def no_op_rollout(
         else:
             action = zero_action
 
-        next_obs, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
-            jax.random.split(rng_step, num_envs), env_state, action, env_params
+        next_obs, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
+            jax.random.split(rng_step, num_envs), env_state, action, env_params, init_env_state
         )
 
         carry = (rng, next_obs, env_state, done)

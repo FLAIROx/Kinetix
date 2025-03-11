@@ -4,13 +4,12 @@ save_path: "checkpoints/kinetix"
 use_wandb: true
 save_policy: true
 wandb_project: "kinetix-experiments"
-wandb_entity: null
+wandb_entity: "mbeukman"
 wandb_mode : online
 video_frequency: 10
 load_from_checkpoint: null
 load_only_params: true
 checkpoint_save_freq: 512
 checkpoint_human_numbers: false
-load_legacy_checkpoint: false
-load_train_levels_legacy: false
 economical_saving: false
+log_buffer_freq: []

@@ -3,6 +3,7 @@
 "num_batches": 3
 "rollout_steps": 512
 "num_to_save": 1024
+"buffer_update_frequency": 128
 
 log_learnability_before_after: false
 put_eval_levels_in_buffer: false

@@ -1,46 +1,22 @@
 from functools import partial
-import math
 
-import chex
 import jax
 import jax.numpy as jnp
 from flax.serialization import to_state_dict
-from jax2d.engine import (
-    calculate_collision_matrix,
-    calc_inverse_mass_polygon,
-    calc_inverse_mass_circle,
-    calc_inverse_inertia_circle,
-    calc_inverse_inertia_polygon,
-    recalculate_mass_and_inertia,
-    select_shape,
-    PhysicsEngine,
-)
-from jax2d.sim_state import SimState, RigidBody, Joint, Thruster
-from jax2d.maths import rmat
-from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
+from jax2d.engine import PhysicsEngine
+
+from kinetix.environment.env_state import EnvParams, StaticEnvParams
 from kinetix.environment.ued.mutators import (
+    mutate_add_connected_shape,
     mutate_add_connected_shape_proper,
     mutate_add_shape,
-    mutate_add_connected_shape,
     mutate_add_thruster,
 )
 from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.environment.ued.util import (
-    get_role,
-    sample_dimensions,
-    is_space_for_shape,
-    random_position_on_polygon,
-    random_position_on_circle,
-    are_there_shapes_present,
-    is_space_for_joint,
-)
-from kinetix.environment.utils import permute_state
-from kinetix.util.saving import load_world_state_pickle
-from flax import struct
-from kinetix.environment.env import create_empty_env
+from kinetix.environment.utils import create_empty_env, permute_state
 
 
-@partial(jax.jit, static_argnums=(1, 3, 5, 6, 7, 8, 9, 10))
+# @partial(jax.jit, static_argnums=(1, 3, 5, 6, 7, 8, 9, 10))
 def create_vmapped_filtered_distribution(
     rng,
     level_sampler,
@@ -69,28 +45,29 @@ def create_vmapped_filtered_distribution(
 
         # No-op filtering
 
-        def _noop_step(states, rng):
+        def _noop_step(carry, rng):
+            states, start_state = carry
             rng, _rng = jax.random.split(rng)
             _rngs = jax.random.split(_rng, n_unfiltered_samples)
 
             action = jnp.zeros((n_unfiltered_samples, *env.action_space(env_params).shape), dtype=jnp.int32)
 
-            obs, states, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
-                _rngs, states, action, env_params
+            obs, states, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
+                _rngs, states, action, env_params, start_state
             )
 
-            return states, (done, reward)
+            return (states, start_state), (done, reward)
 
         # Wrap levels
         rng, _rng = jax.random.split(rng)
         _rngs = jax.random.split(_rng, n_unfiltered_samples)
-        obsv, unfiltered_levels_wrapped = jax.vmap(env.reset_to_level, in_axes=(0, 0, None))(
-            _rngs, unfiltered_levels, env_params
+        obsv, unfiltered_levels_wrapped = jax.vmap(env.reset, in_axes=(0, None, 0))(
+            _rngs, env_params, unfiltered_levels
         )
 
         rng, _rng = jax.random.split(rng)
         _rngs = jax.random.split(_rng, level_filter_n_steps)
-        _, (done, rewards) = jax.lax.scan(_noop_step, unfiltered_levels_wrapped, xs=_rngs)
+        _, (done, rewards) = jax.lax.scan(_noop_step, (unfiltered_levels_wrapped, unfiltered_levels_wrapped), xs=_rngs)
 
         done_indexes = jnp.argmax(done, axis=0)
         done_rewards = rewards[done_indexes, jnp.arange(n_unfiltered_samples)]

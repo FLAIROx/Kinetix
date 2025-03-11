@@ -1,13 +1,14 @@
 import functools
-import jax
-import jax.numpy as jnp
-import flax.linen as nn
-import numpy as np
-from flax.linen.initializers import constant, orthogonal
 from typing import List, Sequence
 
 import distrax
+import flax.linen as nn
+import jax
+import jax.numpy as jnp
+import numpy as np
+from flax.linen.initializers import constant, orthogonal
 
+from kinetix.environment.utils import ActionType
 from kinetix.models.action_spaces import HybridActionDistribution, MultiDiscreteActionDistribution
 
 
@@ -43,7 +44,7 @@ class GeneralActorCriticRNN(nn.Module):
     action_dim: Sequence[int]
     fc_layer_depth: int
     fc_layer_width: int
-    action_mode: str  # "continuous" or "discrete" or "hybrid"
+    action_type: ActionType
     hybrid_action_continuous_dim: int
     multi_discrete_number_of_dims_per_distribution: List[int]
     add_generator_embedding: bool = False
@@ -81,12 +82,12 @@ class GeneralActorCriticRNN(nn.Module):
 
         actor_mean_last = actor_mean
         actor_mean = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(actor_mean)
-        if self.action_mode == "discrete":
+        if self.action_type == ActionType.DISCRETE:
             pi = distrax.Categorical(logits=actor_mean)
-        elif self.action_mode == "continuous":
+        elif self.action_type == ActionType.CONTINUOUS:
             actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
             pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
-        elif self.action_mode == "multi_discrete":
+        elif self.action_type == ActionType.MULTI_DISCRETE:
             pi = MultiDiscreteActionDistribution(actor_mean, self.multi_discrete_number_of_dims_per_distribution)
         else:
             actor_mean_continuous = nn.Dense(
@@ -144,7 +145,7 @@ class ActorCriticPixelsRNN(nn.Module):
             action_dim=self.action_dim,
             fc_layer_depth=self.fc_layer_depth,
             fc_layer_width=self.fc_layer_width,
-            action_mode=self.action_mode,
+            action_type=self.action_mode,
             hybrid_action_continuous_dim=self.hybrid_action_continuous_dim,
             multi_discrete_number_of_dims_per_distribution=self.multi_discrete_number_of_dims_per_distribution,
             add_generator_embedding=self.add_generator_embedding,
@@ -193,7 +194,7 @@ class ActorCriticSymbolicRNN(nn.Module):
             action_dim=self.action_dim,
             fc_layer_depth=self.fc_layer_depth,
             fc_layer_width=self.fc_layer_width,
-            action_mode=self.action_mode,
+            action_type=self.action_mode,
             hybrid_action_continuous_dim=self.hybrid_action_continuous_dim,
             multi_discrete_number_of_dims_per_distribution=self.multi_discrete_number_of_dims_per_distribution,
             add_generator_embedding=self.add_generator_embedding,
@@ -204,3 +205,122 @@ class ActorCriticSymbolicRNN(nn.Module):
     @staticmethod
     def initialize_carry(batch_size, hidden_size=256):
         return ScannedRNN.initialize_carry(batch_size, hidden_size)
+
+
+class MultiHeadDense(nn.Module):
+    num_heads: int  # Number of heads
+    out_dim: int  # Output dimension for each head
+    kernel_init: nn.initializers.Initializer
+    bias_init: nn.initializers.Initializer
+
+    @nn.compact
+    def __call__(self, x):
+        # x has shape (...., num_features, feature_dim)
+        num_features, feature_dim = x.shape[-2:]
+
+        # Initialize a Dense layer for each head, stacked as (num_heads, feature_dim, out_dim)
+        dense_kernels = self.param("dense_kernels", self.kernel_init, (self.num_heads, feature_dim, self.out_dim))
+        dense_biases = self.param("dense_biases", self.bias_init, (self.num_heads, self.out_dim))
+
+        # Apply the dense layer to each head by broadcasting and matrix multiplying
+        x_expanded = jnp.expand_dims(x, axis=-2)  # Shape: (..., num_features, 1, feature_dim)
+        output = jnp.einsum("...fhd,hdo->...fho", x_expanded, dense_kernels) + dense_biases
+        output = nn.relu(output)  # Shape: (..., num_features, num_heads, out_dim)
+        output = output.sum(axis=-3)  # Shape=(..., num_heads, out_dim)
+
+        output = output.reshape((*output.shape[:-2], self.num_heads * self.out_dim))  # Shape=(..., num_heads * out_dim)
+        return output
+
+
+class ActorCriticPermutationInvariantSymbolicRNN(nn.Module):
+    action_dim: Sequence[int]
+    symbolic_embedding_dim: int
+    fc_layer_width: int
+    action_mode: str
+    multi_discrete_number_of_dims_per_distribution: List[int]
+    hybrid_action_continuous_dim: int
+    fc_layer_depth: int
+    activation: str
+    recurrent: bool
+    add_generator_embedding: bool = False
+    include_actions_and_rewards: bool = False
+    permutation_invariant: bool = True
+    num_heads: int = None
+    preprocess_separately: bool = False
+    encoder_size: int = 64
+
+    @nn.compact
+    def __call__(self, hidden, x):
+        # print(f"ActorCriticSymbolicRNN\n")
+        if self.activation == "relu":
+            activation_fn = nn.relu
+        elif self.activation == "tanh":
+            activation_fn = nn.tanh
+        else:
+            raise ValueError(f"Unknown activation function: {self.activation}")
+
+        og_obs, dones = x
+        if self.add_generator_embedding:
+            obs = og_obs.obs
+        else:
+            obs = og_obs
+
+        if self.permutation_invariant:
+            assert (
+                self.symbolic_embedding_dim % self.num_heads == 0
+            ), f"{self.symbolic_embedding_dim=} must be divisible by {self.num_heads=}"
+
+            if self.preprocess_separately:
+
+                def _single_encoder(features, entity_id):
+                    num_to_remove = 4
+                    embedding = activation_fn(
+                        nn.Dense(
+                            self.encoder_size - num_to_remove,
+                            kernel_init=orthogonal(np.sqrt(2)),
+                            bias_init=constant(0.0),
+                        )(features)
+                    )
+                    id_1h = jnp.zeros((*embedding.shape[:3], 4)).at[:, :, :, entity_id].set(1)
+                    return jnp.concatenate([embedding, id_1h], axis=-1)
+
+                circle_encodings = _single_encoder(obs.circles, 0)
+                polygon_encodings = _single_encoder(obs.polygons, 1)
+                joint_encodings = _single_encoder(obs.joints, 2)
+                thruster_encodings = _single_encoder(obs.thrusters, 3)
+
+                all_encodings = jnp.concatenate(
+                    [polygon_encodings, circle_encodings, joint_encodings, thruster_encodings], axis=2
+                )
+                all_mask = jnp.concatenate(
+                    [obs.polygon_mask, obs.circle_mask, obs.joint_mask, obs.thruster_mask], axis=2
+                )
+
+                def mask(features, mask):
+                    return jnp.where(mask[:, None], features, jnp.zeros_like(features))
+
+                obs = jax.vmap(jax.vmap(mask))(all_encodings, all_mask)
+
+            dim_per_head = self.symbolic_embedding_dim // self.num_heads
+            obs_embedding = MultiHeadDense(
+                num_heads=self.num_heads,
+                out_dim=dim_per_head,
+                kernel_init=orthogonal(np.sqrt(2)),
+                bias_init=constant(0.0),
+            )(obs)
+            embedding = obs_embedding
+        embedding = activation_fn(embedding)
+
+        return GeneralActorCriticRNN(
+            action_dim=self.action_dim,
+            fc_layer_depth=self.fc_layer_depth,
+            fc_layer_width=self.fc_layer_width,
+            action_type=self.action_mode,
+            hybrid_action_continuous_dim=self.hybrid_action_continuous_dim,
+            multi_discrete_number_of_dims_per_distribution=self.multi_discrete_number_of_dims_per_distribution,
+            recurrent=self.recurrent,
+        )(hidden, og_obs, embedding, dones, activation_fn)
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_dim):
+        return ScannedRNN.initialize_carry(batch_size, hidden_dim)

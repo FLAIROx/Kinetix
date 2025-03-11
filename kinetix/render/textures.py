@@ -1,8 +1,8 @@
 import os
 import pathlib
-from enum import Enum
-import jax.numpy as jnp
+
 import imageio.v3 as iio
+import jax.numpy as jnp
 import numpy as np
 from PIL import Image
 

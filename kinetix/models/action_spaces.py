@@ -1,9 +1,10 @@
 from typing import Any, Sequence
-from chex import PRNGKey
+
 import distrax
-from flax import struct
 import jax
 import jax.numpy as jnp
+from chex import PRNGKey
+from flax import struct
 
 
 @struct.dataclass
