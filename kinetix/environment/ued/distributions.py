@@ -92,19 +92,22 @@ def create_vmapped_filtered_distribution(
     return levels
 
 
-@partial(jax.jit, static_argnums=(1, 3, 4, 5))
+@partial(jax.jit, static_argnums=(1, 3, 4))
 def sample_kinetix_level(
     rng,
     engine: PhysicsEngine,
     env_params: EnvParams,
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
-    env_size_name: str = "l",
 ):
     rng, _rng = jax.random.split(rng)
     _rngs = jax.random.split(_rng, 12)
 
-    small_force_no_fixate = env_size_name == "s"
+    small_force_no_fixate = static_env_params.num_polygons + static_env_params.num_circles <= 7
+
+    add_shape_n_proposals = ued_params.add_shape_n_proposals
+    if static_env_params.num_polygons + static_env_params.num_circles <= 7:
+        add_shape_n_proposals = 1  # otherwise we get a very weird XLA bug.
 
     # Start with empty state
     state = create_empty_env(static_env_params)
@@ -142,7 +145,7 @@ def sample_kinetix_level(
 
     def _add_filtered_shape(rng, state, force_no_fixate=False):
         rng, _rng = jax.random.split(rng)
-        _rngs = jax.random.split(_rng, ued_params.add_shape_n_proposals)
+        _rngs = jax.random.split(_rng, add_shape_n_proposals)
         proposed_additions = jax.vmap(mutate_add_shape, in_axes=(0, None, None, None, None, None))(
             _rngs,
             state,
@@ -156,13 +159,13 @@ def sample_kinetix_level(
 
     def _add_filtered_connected_shape(rng, state, force_rjoint=False):
         rng, _rng = jax.random.split(rng)
-        _rngs = jax.random.split(_rng, ued_params.add_shape_n_proposals)
+        _rngs = jax.random.split(_rng, add_shape_n_proposals)
 
         proposed_additions, valid = jax.vmap(mutate_add_connected_shape, in_axes=(0, None, None, None, None, None))(
             _rngs, state, env_params, static_env_params, ued_params, force_rjoint
         )
 
-        bias = (jnp.ones(ued_params.add_shape_n_proposals) - 1 * valid) * ued_params.connect_no_visibility_bias
+        bias = (jnp.ones(add_shape_n_proposals) - 1 * valid) * ued_params.connect_no_visibility_bias
 
         return _choose_proposal_with_least_collisions(proposed_additions, bias=bias)
 

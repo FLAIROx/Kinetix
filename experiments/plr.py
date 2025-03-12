@@ -25,15 +25,15 @@ from kinetix.environment import (
     create_random_starting_distribution,
     make_kinetix_env,
     make_mutate_env,
-    make_reset_func_from_config,
+    make_reset_fn_from_config,
     make_vmapped_filtered_level_sampler,
 )
+from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.models import ScannedRNN, make_network_from_config
 from kinetix.render import make_render_pixels
 from kinetix.util import (
     general_eval,
     generate_params_from_config,
-    generate_ued_params_from_config,
     get_eval_level_groups,
     get_eval_levels,
     get_video_frequency,
@@ -251,6 +251,7 @@ def main(config=None):
     env_params, static_env_params = generate_params_from_config(config)
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
+    ued_params = UEDParams()
 
     run = init_wandb(config, my_name)
     config_for_env = config  # so that enums do not break
@@ -457,7 +458,7 @@ def main(config=None):
 
     env = make_env(static_env_params)
 
-    sample_random_level = make_reset_func_from_config(
+    sample_random_level = make_reset_fn_from_config(
         config, env_params, static_env_params, physics_engine=env.physics_engine
     )
     if config["use_accel"] and config["accel_start_from_empty"]:
@@ -490,7 +491,6 @@ def main(config=None):
         | {"frame_skip": config["frame_skip"], "dense_reward_scale": config["dense_reward_scale"]}
     )
     eval_env = make_env(eval_static_env_params)
-    ued_params = generate_ued_params_from_config(config)
 
     mutate_world = make_mutate_env(static_env_params, env_params, ued_params)
 

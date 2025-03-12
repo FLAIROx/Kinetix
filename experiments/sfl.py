@@ -26,7 +26,7 @@ import wandb
 from kinetix.environment import (
     LogWrapper,
     make_kinetix_env,
-    make_reset_func_from_config,
+    make_reset_fn_from_config,
     make_vmapped_filtered_level_sampler,
 )
 from kinetix.models import ScannedRNN, make_network_from_config
@@ -105,7 +105,7 @@ def main(config):
 
     env = make_env(static_env_params)
 
-    sample_random_level = make_reset_func_from_config(
+    sample_random_level = make_reset_fn_from_config(
         config, env_params, static_env_params, physics_engine=env.physics_engine
     )
     sample_random_levels = make_vmapped_filtered_level_sampler(

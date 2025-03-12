@@ -53,17 +53,6 @@ def generate_params_from_config(config):
     return env_params, static_env_params
 
 
-def generate_ued_params_from_config(config) -> UEDParams:
-    ans = UEDParams()
-
-    if config["env_size_name"] == "s":
-        ans = ans.replace(add_shape_n_proposals=1)  # otherwise we get a very weird XLA bug.
-    if "fixate_chance_max" in config:
-        print("Changing fixate chance max to", config["fixate_chance_max"])
-        ans = ans.replace(fixate_chance_max=config["fixate_chance_max"])
-    return ans
-
-
 def get_eval_level_groups(eval_levels: List[str]) -> List[Tuple[str, str]]:
     def get_groups(s):
         # This is the size group

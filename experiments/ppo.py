@@ -5,7 +5,7 @@ from typing import Any, NamedTuple
 import hydra
 import jax
 import jax.numpy as jnp
-from kinetix.environment import make_reset_func_from_config
+from kinetix.environment import make_reset_fn_from_config
 import numpy as np
 import optax
 from flax.serialization import to_state_dict
@@ -50,7 +50,7 @@ def make_train(config, env_params, static_env_params):
             config,
             env_params,
             static_env_params,
-            reset_func=make_reset_func_from_config(config, env_params, static_env_params),
+            reset_func=make_reset_fn_from_config(config, env_params, static_env_params),
         )
     )
     eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
