@@ -45,26 +45,20 @@ def make_train(config, env_params, static_env_params):
     config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
     config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
 
-    env = LogWrapper(
-        make_kinetix_env(
-            config["action_type"],
-            config["observation_type"],
-            make_reset_fn_from_config(config, env_params, static_env_params),
-            env_params,
-            static_env_params,
-            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+    def make_env(reset_fn):
+        return LogWrapper(
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                reset_fn,
+                env_params,
+                static_env_params,
+                ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+            )
         )
-    )
-    eval_env = LogWrapper(
-        make_kinetix_env(
-            config["action_type"],
-            config["observation_type"],
-            None,
-            env_params,
-            static_env_params,
-            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
-        )
-    )
+
+    env = make_env(make_reset_fn_from_config(config, env_params, static_env_params))
+    eval_env = make_env(None)
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]
