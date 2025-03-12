@@ -370,7 +370,8 @@ def update_actor_critic_rnn(
     return jax.lax.scan(update_epoch, (rng, train_state), None, n_epochs)
 
 
-@partial(jax.jit, static_argnums=(0, 2, 8, 9))
+# Cannot jit outside otherwise jax errors with trying to hash a tracer.
+# @partial(jax.jit, static_argnums=(0, 2, 8, 9))
 def sample_trajectories_and_learn(
     env: UnderspecifiedEnv,
     env_params: EnvParams,
@@ -423,6 +424,7 @@ def sample_trajectories_and_learn(
         )
     """
 
+    @jax.jit
     def single_step(carry, _):
         rng, train_state, init_hstate, init_obs, init_env_state = carry
         ((rng, train_state, new_hstate, last_obs, last_env_state, last_value), traj,) = sample_trajectories_rnn(
@@ -465,11 +467,15 @@ def sample_trajectories_and_learn(
             step += (states,)
         return new_carry, step
 
-    carry = (rng, train_state, init_hstate, init_obs, init_env_state)
-    new_carry, all_rollouts = jax.lax.scan(single_step, carry, None, length=config["outer_rollout_steps"])
+    @jax.jit
+    def inner(rng, train_state, init_hstate, init_obs, init_env_state):
+        carry = (rng, train_state, init_hstate, init_obs, init_env_state)
+        new_carry, all_rollouts = jax.lax.scan(single_step, carry, None, length=config["outer_rollout_steps"])
 
-    all_rollouts = jax.tree_util.tree_map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
-    return new_carry, all_rollouts
+        all_rollouts = jax.tree_util.tree_map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
+        return new_carry, all_rollouts
+
+    return inner(rng, train_state, init_hstate, init_obs, init_env_state)
 
 
 def no_op_rollout(
