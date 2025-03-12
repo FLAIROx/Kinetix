@@ -17,7 +17,7 @@ def main():
     env = make_kinetix_env(
         observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
-        reset_func=lambda rng: level,
+        reset_fn=lambda rng: level,
         env_params=env_params,
         static_env_params=static_env_params,
     )
