@@ -213,9 +213,11 @@ Further improvements have been made, so if you wish to reproduce the paper's res
 - 👨‍💻 [JaxGL](https://github.com/FLAIROx/JaxGL) The graphics library we made for Kinetix.
 - 📋 [Our Paper](https://arxiv.org/abs/2410.23208) for more details and empirical results.
 
-# Acknowledgements
-Thanks to Thomas Foster, Alex Goldie, Matthew Jackson, Sebastian Towers and Andrei Lupu for useful feedback.
+# 🙏 Acknowledgements
 The permutation invariant MLP model that is now default was added by [Anya Sims](https://github.com/anyasims).
+Thanks to [Thomas Foster](https://github.com/thomfoster) for fixing some macOS specific issues.
+We'd also like to thank to Thomas Foster, Alex Goldie, Matthew Jackson, Sebastian Towers and Andrei Lupu for useful feedback.
+
 # 📚 Citation
 If you use Kinetix in your work, please cite it as follows:
 ```
