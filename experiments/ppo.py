@@ -47,13 +47,24 @@ def make_train(config, env_params, static_env_params):
 
     env = LogWrapper(
         make_kinetix_env(
-            config,
+            config["action_type"],
+            config["observation_type"],
+            make_reset_fn_from_config(config, env_params, static_env_params),
             env_params,
             static_env_params,
-            reset_func=make_reset_fn_from_config(config, env_params, static_env_params),
+            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
         )
     )
-    eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
+    eval_env = LogWrapper(
+        make_kinetix_env(
+            config["action_type"],
+            config["observation_type"],
+            None,
+            env_params,
+            static_env_params,
+            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+        )
+    )
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]

@@ -9,6 +9,7 @@ from omegaconf import OmegaConf
 
 from kinetix.environment import LogWrapper
 from kinetix.environment.env import make_kinetix_env
+from kinetix.environment.ued.ued import make_reset_fn_from_config
 from kinetix.models import ScannedRNN, make_network_from_config
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util import (
@@ -27,7 +28,17 @@ def main(config):
     config = normalise_config(OmegaConf.to_container(config), "PPO")
     env_params, static_env_params = generate_params_from_config(config)
 
-    env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
+    env = LogWrapper(
+        make_kinetix_env(
+            config["action_type"],
+            config["observation_type"],
+            None,
+            env_params,
+            static_env_params,
+            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+        )
+    )
+
     eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
     # to keep the batch dimension
     NUM_ENVS_IN_PARALLEL = 1

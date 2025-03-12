@@ -100,7 +100,16 @@ def main(config):
     assert (config["num_envs_from_sampled"] + config["num_envs_to_generate"]) == config["num_train_envs"]
 
     def make_env(static_env_params):
-        env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
+        env = LogWrapper(
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                None,
+                env_params,
+                static_env_params,
+                ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+            )
+        )
         return env
 
     env = make_env(static_env_params)

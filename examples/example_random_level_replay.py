@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random
 from matplotlib import pyplot as plt
 
-from kinetix.environment import EnvParams, UEDParams, make_kinetix_env, sample_kinetix_level
+from kinetix.environment import EnvParams, UEDParams, make_kinetix_env, sample_kinetix_level, StaticEnvParams
 from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.render import make_render_pixels
 
@@ -12,14 +12,15 @@ def main():
     # Use default parameters
     env_params = EnvParams()
     ued_params = UEDParams()
+    static_env_params = StaticEnvParams()
 
     # Create the environment
     env = make_kinetix_env(
-        config=None,
         observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
+        reset_fn=None,
         env_params=env_params,
-        reset_func=None,
+        static_env_params=static_env_params,
     )
 
     # Sample a random level

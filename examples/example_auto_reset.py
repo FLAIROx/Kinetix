@@ -16,12 +16,11 @@ def main():
     static_env_params = StaticEnvParams()
     # Create the environment
     env = make_kinetix_env(
-        config=None,
         observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
+        reset_func=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
         env_params=env_params,
         static_env_params=static_env_params,
-        reset_func=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
     )
     rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)
     # Reset the environment state (this resets to a random level)
