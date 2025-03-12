@@ -26,14 +26,8 @@ from kinetix.environment.ued.mutators import (
 )
 from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.utils import create_empty_env
-from kinetix.util.config import generate_params_from_config, generate_ued_params_from_config
 from kinetix.util.learning import get_eval_levels
 from kinetix.util.saving import load_world_state_pickle
-
-
-class ResetMode(Enum):
-    RANDOM = "random"
-    LIST = "list"
 
 
 def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
@@ -102,51 +96,28 @@ def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, u
     return mutate_level
 
 
-def make_create_eval_env():
-    eval_level1 = load_world_state_pickle("worlds/eval/eval_0610_car1")
-    eval_level2 = load_world_state_pickle("worlds/eval/eval_0610_car2")
-    eval_level3 = load_world_state_pickle("worlds/eval/eval_0628_ball_left")
-    eval_level4 = load_world_state_pickle("worlds/eval/eval_0628_ball_right")
-    eval_level5 = load_world_state_pickle("worlds/eval/eval_0628_hard_car_obstacle")
-    eval_level6 = load_world_state_pickle("worlds/eval/eval_0628_swingup")
-
-    def _create_eval_env(rng, env_params, static_env_params, index):
-        return jax.lax.switch(
-            index,
-            [
-                lambda: eval_level1,
-                lambda: eval_level2,
-                lambda: eval_level3,
-                lambda: eval_level4,
-                lambda: eval_level5,
-                lambda: eval_level6,
-            ],
-        )
-        return jax.tree.map(lambda x, y: jax.lax.select(index == 0, x, y), eval_level1, eval_level2)
-
-    return _create_eval_env
-
-
-def make_reset_train_function_with_mutations(
-    engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams, config
+def make_reset_fn_sample_kinetix_level(
+    env_params: EnvParams,
+    static_env_params: StaticEnvParams,
+    ued_params: UEDParams = None,
+    physics_engine: PhysicsEngine = None,
 ):
 
-    ued_params = generate_ued_params_from_config(config)
+    ued_params = ued_params or UEDParams()
+    physics_engine = physics_engine or PhysicsEngine(static_env_params)
 
     def reset(rng):
-        inner = sample_kinetix_level(
-            rng, engine, env_params, static_env_params, ued_params, env_size_name=config["env_size_name"]
-        )
+        sampled_level = sample_kinetix_level(rng, physics_engine, env_params, static_env_params, ued_params)
 
-        return inner
+        return sampled_level
 
     return reset
 
 
 def make_vmapped_filtered_level_sampler(
-    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, env
+    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, env, ued_params: UEDParams = None
 ):
-    ued_params = generate_ued_params_from_config(config)
+    ued_params = ued_params or UEDParams()
 
     @partial(jax.jit, static_argnums=(1,))
     def reset(rng, n_samples):
@@ -168,22 +139,16 @@ def make_vmapped_filtered_level_sampler(
     return reset
 
 
-def make_reset_train_function_with_list_of_levels(config, levels, static_env_params, is_loading_train_levels=False):
+def make_reset_fn_list_of_levels(levels, static_env_params):
     assert len(levels) > 0, "Need to provide at least one level to train on"
-    if is_loading_train_levels:
-        v = get_eval_levels(levels, static_env_params)
-    else:
-        _, static_env_params = generate_params_from_config(
-            config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}
-        )
-        v = get_eval_levels(levels, static_env_params)
+    eval_levels = get_eval_levels(levels, static_env_params)
 
     def reset(rng):
-        rng, _rng, _rng2 = jax.random.split(rng, 3)
-        idx = jax.random.randint(_rng, (), 0, len(levels))
-        state_to_return = jax.tree.map(lambda x: x[idx], v)
+        rng, _rng = jax.random.split(rng)
+        level_idx = jax.random.randint(_rng, (), 0, len(levels))
+        sampled_level = jax.tree.map(lambda x: x[level_idx], eval_levels)
 
-        return state_to_return
+        return sampled_level
 
     return reset
 
@@ -201,56 +166,21 @@ ALL_MUTATION_FNS = [
 ]
 
 
-def make_reset_func_from_config(
-    config, env_params: EnvParams, static_env_params: StaticEnvParams, physics_engine: PhysicsEngine = None
+def make_reset_fn_from_config(
+    config,
+    env_params: EnvParams,
+    static_env_params: StaticEnvParams,
+    physics_engine: PhysicsEngine = None,
+    ued_params: UEDParams = None,
 ):
     if config["train_level_mode"] == "list":
-        reset_func = make_reset_train_function_with_list_of_levels(
-            config, config["train_levels_list"], static_env_params, is_loading_train_levels=True
-        )
+        reset_fn = make_reset_fn_list_of_levels(config["train_levels_list"], static_env_params)
     elif config["train_level_mode"] == "random":
-        reset_func = make_reset_train_function_with_mutations(
-            physics_engine or PhysicsEngine(static_env_params), env_params, static_env_params, config
-        )
+        reset_fn = make_reset_fn_sample_kinetix_level(env_params, static_env_params, ued_params, physics_engine)
     else:
         raise ValueError("Invalid Reset Function Provided")
 
-    return reset_func
-
-
-def make_reset_func(
-    env_params: EnvParams,
-    static_env_params: StaticEnvParams,
-    reset_mode: ResetMode,
-    list_of_train_levels: list[str] = None,
-    physics_engine: PhysicsEngine = None,
-    env_size_name: str = "custom",
-) -> Callable[[chex.PRNGKey], EnvState]:
-    """This creates a reset function for the environment
-
-    Args:
-        env_params (EnvParams):
-        static_env_params (StaticEnvParams):
-        reset_mode (ResetMode): RANDOM or LIST
-        list_of_train_levels (list[str], optional): If mode is LIST, this needs to be given, and controls the list of levels we can reset to. Defaults to None.
-        physics_engine (PhysicsEngine, optional): If not given, we instantiate a new physics engine object. Defaults to None.
-        env_size_name (str, optional): The size of the environment. Defaults to "custom".
-
-    Returns:
-        Callable[[chex.PRNGKey], EnvState]: Reset function
-    """
-    if reset_mode == ResetMode.LIST:
-        assert list_of_train_levels is not None, "List of train levels must be provided if using list reset mode"
-    return make_reset_func_from_config(
-        {
-            "train_level_mode": reset_mode.value,
-            "train_levels_list": list_of_train_levels,
-            "env_size_name": env_size_name,
-        },
-        env_params,
-        static_env_params,
-        physics_engine=physics_engine,
-    )
+    return reset_fn
 
 
 def test_ued():
@@ -266,7 +196,7 @@ def test_ued():
     state = mutate_remove_shape(_rng, state, env_params, static_env_params, ued_params)
     state = mutate_remove_joint(_rng, state, env_params, static_env_params, ued_params)
     state = mutate_swap_role(_rng, state, env_params, static_env_params, ued_params)
-    state = mutate_toggle_fixture(_rng, state, env_params, static_env_params, ued_params)
+    mutate_toggle_fixture(_rng, state, env_params, static_env_params, ued_params)
 
     print("Successfully did this")
 

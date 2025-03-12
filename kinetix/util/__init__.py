@@ -4,7 +4,6 @@ from kinetix.util.config import (
     init_wandb,
     normalise_config,
     get_video_frequency,
-    generate_ued_params_from_config,
 )
 from kinetix.util.learning import general_eval, get_eval_levels, no_op_and_random_rollout, sample_trajectories_and_learn
 from kinetix.util.saving import (

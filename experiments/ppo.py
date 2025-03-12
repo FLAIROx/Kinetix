@@ -5,7 +5,7 @@ from typing import Any, NamedTuple
 import hydra
 import jax
 import jax.numpy as jnp
-from kinetix.environment import make_reset_func_from_config
+from kinetix.environment import make_reset_fn_from_config
 import numpy as np
 import optax
 from flax.serialization import to_state_dict
@@ -45,15 +45,20 @@ def make_train(config, env_params, static_env_params):
     config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
     config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
 
-    env = LogWrapper(
-        make_kinetix_env(
-            config,
-            env_params,
-            static_env_params,
-            reset_func=make_reset_func_from_config(config, env_params, static_env_params),
+    def make_env(reset_fn):
+        return LogWrapper(
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                reset_fn,
+                env_params,
+                static_env_params,
+                ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+            )
         )
-    )
-    eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
+
+    env = make_env(make_reset_fn_from_config(config, env_params, static_env_params))
+    eval_env = make_env(None)
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]

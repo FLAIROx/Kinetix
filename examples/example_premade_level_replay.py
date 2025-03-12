@@ -15,12 +15,11 @@ def main():
 
     # Create the environment
     env = make_kinetix_env(
-        config=None,
-        observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
+        observation_type=ObservationType.PIXELS,
+        reset_fn=lambda rng: level,
         env_params=env_params,
         static_env_params=static_env_params,
-        reset_func=lambda _rng: level,
     )
 
     rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)

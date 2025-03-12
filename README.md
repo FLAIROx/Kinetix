@@ -94,20 +94,21 @@ static_env_params = StaticEnvParams()
 
 # Create the environment
 env = make_kinetix_env(
-    config=None,
-    observation_type=ObservationType.PIXELS,
-    action_type=ActionType.CONTINUOUS,
-    env_params=env_params,
-    reset_func=make_reset_func(env_params, static_env_params, reset_mode=ResetMode.RANDOM),
+  observation_type=ObservationType.PIXELS,
+  action_type=ActionType.CONTINUOUS,
+  reset_fn=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
+  env_params=env_params,
+  static_env_params=static_env_params,
 )
 
 # Reset the environment state (this resets to a random level)
-rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)
-obs, env_state = env.reset(_rng_reset, env_params)
+_rngs = jax.random.split(jax.random.PRNGKey(0), 3)
+
+obs, env_state = env.reset(_rngs[0], env_params)
 
 # Take a step in the environment
-action = env.action_space(env_params).sample(_rng_action)
-obs, env_state, reward, done, info = env.step(_rng_step, env_state, action, env_params)
+action = env.action_space(env_params).sample(_rngs[1])
+obs, env_state, reward, done, info = env.step(_rngs[2], env_state, action, env_params)
 
 # Render environment
 renderer = make_render_pixels(env_params, env.static_env_params)

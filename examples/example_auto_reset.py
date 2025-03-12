@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 
 from kinetix.environment import EnvParams, make_kinetix_env
 from kinetix.environment.env_state import StaticEnvParams
-from kinetix.environment import ResetMode, make_reset_func
+from kinetix.environment.ued.ued import make_reset_fn_sample_kinetix_level
 from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.render import make_render_pixels
 
@@ -16,12 +16,11 @@ def main():
     static_env_params = StaticEnvParams()
     # Create the environment
     env = make_kinetix_env(
-        config=None,
-        observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
+        observation_type=ObservationType.PIXELS,
+        reset_fn=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
         env_params=env_params,
         static_env_params=static_env_params,
-        reset_func=make_reset_func(env_params, static_env_params, reset_mode=ResetMode.RANDOM),
     )
     rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(0), 4)
     # Reset the environment state (this resets to a random level)

@@ -26,7 +26,7 @@ import wandb
 from kinetix.environment import (
     LogWrapper,
     make_kinetix_env,
-    make_reset_func_from_config,
+    make_reset_fn_from_config,
     make_vmapped_filtered_level_sampler,
 )
 from kinetix.models import ScannedRNN, make_network_from_config
@@ -100,12 +100,21 @@ def main(config):
     assert (config["num_envs_from_sampled"] + config["num_envs_to_generate"]) == config["num_train_envs"]
 
     def make_env(static_env_params):
-        env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
+        env = LogWrapper(
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                None,
+                env_params,
+                static_env_params,
+                ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
+            )
+        )
         return env
 
     env = make_env(static_env_params)
 
-    sample_random_level = make_reset_func_from_config(
+    sample_random_level = make_reset_fn_from_config(
         config, env_params, static_env_params, physics_engine=env.physics_engine
     )
     sample_random_levels = make_vmapped_filtered_level_sampler(
