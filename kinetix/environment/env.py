@@ -303,7 +303,7 @@ def make_kinetix_env(
         obs_type_cls = SymbolicObservations
     elif observation_type == ObservationType.SYMBOLIC_ENTITY:
         obs_type_cls = EntityObservations
-        obs_kws = {"ignore_mask": config.get("permutation_invariant_mlp", False)}
+        obs_kws = {"ignore_mask": (config or {}).get("permutation_invariant_mlp", False)}
     elif observation_type == ObservationType.SYMBOLIC_FLAT_PADDED:
         obs_type_cls = SymbolicPaddedObservations
     else:
