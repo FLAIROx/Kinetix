@@ -279,12 +279,6 @@ def make_kinetix_env(
         env_params = EnvParams()
     if static_env_params is None:
         static_env_params = StaticEnvParams()
-    # if action_type is None:
-    #     assert config is not None, "If action_type is not given, config must be given"
-    #     action_type = config["action_type"]
-    # if observation_type is None:
-    #     assert config is not None, "If observation_type is not given, config must be given"
-    #     observation_type = config["observation_type"]
 
     if action_type == ActionType.DISCRETE:
         action_type_cls = DiscreteActions
@@ -304,7 +298,6 @@ def make_kinetix_env(
     elif observation_type == ObservationType.SYMBOLIC_ENTITY:
         obs_type_cls = EntityObservations
         obs_kws = {"ignore_mask": ignore_mask_in_obs}
-        # obs_kws = {"ignore_mask": config.get("permutation_invariant_mlp", False)}
     elif observation_type == ObservationType.SYMBOLIC_FLAT_PADDED:
         obs_type_cls = SymbolicPaddedObservations
     else:
