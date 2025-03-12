@@ -27,7 +27,7 @@ def main(config):
     config = normalise_config(OmegaConf.to_container(config), "PPO")
     env_params, static_env_params = generate_params_from_config(config)
 
-    env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, make_empty_reset_func=True))
+    env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
     eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
     # to keep the batch dimension
     NUM_ENVS_IN_PARALLEL = 1

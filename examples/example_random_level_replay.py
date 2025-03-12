@@ -19,7 +19,7 @@ def main():
         observation_type=ObservationType.PIXELS,
         action_type=ActionType.CONTINUOUS,
         env_params=env_params,
-        make_empty_reset_func=True,
+        reset_func=None,
     )
 
     # Sample a random level

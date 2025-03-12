@@ -100,12 +100,14 @@ def main(config):
     assert (config["num_envs_from_sampled"] + config["num_envs_to_generate"]) == config["num_train_envs"]
 
     def make_env(static_env_params):
-        env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, make_empty_reset_func=True))
+        env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
         return env
 
     env = make_env(static_env_params)
 
-    sample_random_level = make_reset_func_from_config(config, env.physics_engine, env_params, static_env_params)
+    sample_random_level = make_reset_func_from_config(
+        config, env_params, static_env_params, physics_engine=env.physics_engine
+    )
     sample_random_levels = make_vmapped_filtered_level_sampler(
         sample_random_level, env_params, static_env_params, config, env=env
     )

@@ -90,13 +90,15 @@ Kinetix follows the interface established in [gymnax](https://github.com/RobertT
 ```python
 # Use default parameters
 env_params = EnvParams()
+static_env_params = StaticEnvParams()
 
 # Create the environment
 env = make_kinetix_env(
-    config={"train_level_mode": "random"},
+    config=None,
     observation_type=ObservationType.PIXELS,
     action_type=ActionType.CONTINUOUS,
     env_params=env_params,
+    reset_func=make_reset_func(env_params, static_env_params, reset_mode=ResetMode.RANDOM),
 )
 
 # Reset the environment state (this resets to a random level)

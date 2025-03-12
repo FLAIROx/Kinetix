@@ -5,6 +5,7 @@ from typing import Any, NamedTuple
 import hydra
 import jax
 import jax.numpy as jnp
+from kinetix.environment import make_reset_func_from_config
 import numpy as np
 import optax
 from flax.serialization import to_state_dict
@@ -44,8 +45,15 @@ def make_train(config, env_params, static_env_params):
     config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
     config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
 
-    env = LogWrapper(make_kinetix_env(config, env_params, static_env_params))
-    eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, make_empty_reset_func=True))
+    env = LogWrapper(
+        make_kinetix_env(
+            config,
+            env_params,
+            static_env_params,
+            reset_func=make_reset_func_from_config(config, env_params, static_env_params),
+        )
+    )
+    eval_env = LogWrapper(make_kinetix_env(config, env_params, static_env_params, reset_func=None))
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]

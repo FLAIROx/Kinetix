@@ -10,7 +10,9 @@ from kinetix.environment.ued.distributions import create_random_starting_distrib
 from kinetix.environment.ued.ued import (
     make_mutate_env,
     make_reset_func_from_config,
+    make_reset_func,
     make_vmapped_filtered_level_sampler,
+    ResetMode,
 )
 
 from kinetix.environment.ued.distributions import sample_kinetix_level

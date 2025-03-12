@@ -452,12 +452,14 @@ def main(config=None):
 
     # Setup the environment.
     def make_env(static_env_params):
-        env = LogWrapper(make_kinetix_env(config_for_env, env_params, static_env_params, make_empty_reset_func=True))
+        env = LogWrapper(make_kinetix_env(config_for_env, env_params, static_env_params, reset_func=True))
         return env
 
     env = make_env(static_env_params)
 
-    sample_random_level = make_reset_func_from_config(config, env.physics_engine, env_params, static_env_params)
+    sample_random_level = make_reset_func_from_config(
+        config, env_params, static_env_params, physics_engine=env.physics_engine
+    )
     if config["use_accel"] and config["accel_start_from_empty"]:
 
         def make_sample_random_level():

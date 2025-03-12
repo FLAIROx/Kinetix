@@ -1,4 +1,6 @@
+from enum import Enum
 from functools import partial
+from typing import Callable
 
 import chex
 import jax
@@ -27,6 +29,11 @@ from kinetix.environment.utils import create_empty_env
 from kinetix.util.config import generate_params_from_config, generate_ued_params_from_config
 from kinetix.util.learning import get_eval_levels
 from kinetix.util.saving import load_world_state_pickle
+
+
+class ResetMode(Enum):
+    RANDOM = "random"
+    LIST = "list"
 
 
 def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
@@ -194,6 +201,58 @@ ALL_MUTATION_FNS = [
 ]
 
 
+def make_reset_func_from_config(
+    config, env_params: EnvParams, static_env_params: StaticEnvParams, physics_engine: PhysicsEngine = None
+):
+    if config["train_level_mode"] == "list":
+        reset_func = make_reset_train_function_with_list_of_levels(
+            config, config["train_levels_list"], static_env_params, is_loading_train_levels=True
+        )
+    elif config["train_level_mode"] == "random":
+        reset_func = make_reset_train_function_with_mutations(
+            physics_engine or PhysicsEngine(static_env_params), env_params, static_env_params, config
+        )
+    else:
+        raise ValueError("Invalid Reset Function Provided")
+
+    return reset_func
+
+
+def make_reset_func(
+    env_params: EnvParams,
+    static_env_params: StaticEnvParams,
+    reset_mode: ResetMode,
+    list_of_train_levels: list[str] = None,
+    physics_engine: PhysicsEngine = None,
+    env_size_name: str = "custom",
+) -> Callable[[chex.PRNGKey], EnvState]:
+    """This creates a reset function for the environment
+
+    Args:
+        env_params (EnvParams):
+        static_env_params (StaticEnvParams):
+        reset_mode (ResetMode): RANDOM or LIST
+        list_of_train_levels (list[str], optional): If mode is LIST, this needs to be given, and controls the list of levels we can reset to. Defaults to None.
+        physics_engine (PhysicsEngine, optional): If not given, we instantiate a new physics engine object. Defaults to None.
+        env_size_name (str, optional): The size of the environment. Defaults to "custom".
+
+    Returns:
+        Callable[[chex.PRNGKey], EnvState]: Reset function
+    """
+    if reset_mode == ResetMode.LIST:
+        assert list_of_train_levels is not None, "List of train levels must be provided if using list reset mode"
+    return make_reset_func_from_config(
+        {
+            "train_level_mode": reset_mode.value,
+            "train_levels_list": list_of_train_levels,
+            "env_size_name": env_size_name,
+        },
+        env_params,
+        static_env_params,
+        physics_engine=physics_engine,
+    )
+
+
 def test_ued():
 
     env_params = EnvParams()
@@ -214,18 +273,3 @@ def test_ued():
 
 if __name__ == "__main__":
     test_ued()
-
-
-def make_reset_func_from_config(
-    config, physics_engine: PhysicsEngine, env_params: EnvParams, static_env_params: StaticEnvParams
-):
-    if config["train_level_mode"] == "list":
-        reset_func = make_reset_train_function_with_list_of_levels(
-            config, config["train_levels_list"], static_env_params, is_loading_train_levels=True
-        )
-    elif config["train_level_mode"] == "random":
-        reset_func = make_reset_train_function_with_mutations(physics_engine, env_params, static_env_params, config)
-    else:
-        raise ValueError("Invalid Reset Function Provided")
-
-    return reset_func

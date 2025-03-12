@@ -44,10 +44,10 @@ Finally, **Pixels** runs the slowest, and also requires more memory, which means
 We have two primary resetting functions that control the environment's behaviour when an episode ends. The first of these is to train on a known, predefined set of levels, and resetting samples a new level from this set. In the extreme case, this also allows training only on a single level in the standard RL manner. The other main way of resetting is to sample a *random* level from some distribution, meaning that it is exceedingly unlikely to sample the same level twice.
 
 ### 🔪 Sharp Bits 🔪
-When using `make_kinetix_env`, you can specify the reset function in a variety of ways.
-- Passing `config={"train_level_mode": "random"}`
-- Passing `config={"train_level_mode": "list", "train_levels_list": ["m/arm_up", "m/h9_spin_the_right_way"]}`
-- Setting `reset_func` to be a callable, taking in an rng and returning an `EnvState`.
+When using `make_kinetix_env`, you can specify the reset function by passing `reset_func`, a callable, taking in an rng and returning an `EnvState`.
+
+This reset function can be made manually, or using the `make_reset_func` function.
+Either `reset_mode=ResetMode.RANDOM` can be passed, in which case random levels will be generated upon reset, or if `reset_mode=ResetMode.LIST`, then the argument `train_levels_list` must be specified as a list of strings, containing levels to load. In this case, a random level will always be chosen from this list upon reset.
 
 All of these result in an environment object that has gymnax auto-reset behaviour, i.e., when you run `.step`, and the episode terminates, it automatically resets to a new initial state.
 
@@ -63,7 +63,7 @@ obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_param
 obs, env_state, reward, done, info = env.step(_rng, env_state, action, env_params, level) # if the episode terminates, it would reset to `level`, otherwise it would just step normally.
 ```
 
-Finally, if you use `make_kinetix_env(..., reset_func=None, make_empty_reset_func=True)`, then the environment will throw an exception whenever you try and `step` or `reset` without explicitly passing a `override_reset_state`.
+Finally, if you use `make_kinetix_env(..., reset_func=None)`, then the environment will throw an exception whenever you try and `step` or `reset` without explicitly passing a `override_reset_state`.
 
 ## Evaluate an Agent
 If you train an agent using one of the scripts in `experiments`, a checkpoint will be saved by default to wandb. Then, this checkpoint can be loaded. See `examples/example_inference.py` for how to perform inference. This script can be used as follows:
