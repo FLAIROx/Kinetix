@@ -82,20 +82,18 @@ from kinetix.util import (
     time_function,
 )
 
-ss = tmr()
-
-
 jax.config.update("jax_compilation_cache_dir", ".cache-location")
 
 
-sys.path.append("editor")
+# sys.path.append("editor")
 
 
-root = Tk()
-root.destroy()
+from sys import platform
 
-ee = tmr()
-print(f"Imported in {ee - ss} seconds")
+# Hack for macOS
+if platform == "darwin":
+    root = Tk()
+    root.destroy()
 
 editor = None
 outer_timer = tmr()
@@ -1315,12 +1313,11 @@ class Editor:
         )
         self.env_params = new_env_params
         self.env = make_kinetix_env(
-            self.config,
+            ActionType.MULTI_DISCRETE,
+            ObservationType.SYMBOLIC_ENTITY,
+            make_reset_function(self.static_env_params),
             self.env_params,
             self.static_env_params,
-            observation_type=ObservationType.SYMBOLIC_ENTITY,
-            action_type=ActionType.MULTI_DISCRETE,
-            reset_func=make_reset_function(self.static_env_params),
         )
         self._setup_rendering(self.static_env_params, self.env_params)
 
@@ -2122,29 +2119,22 @@ def main(config):
     config["static_env_params"] = to_state_dict(static_env_params)
 
     env = make_kinetix_env(
-        config,
+        ActionType.MULTI_DISCRETE,
+        ObservationType.SYMBOLIC_ENTITY,
+        make_reset_function(static_env_params),
         env_params,
         static_env_params,
-        observation_type=ObservationType.SYMBOLIC_ENTITY,
-        action_type=ActionType.MULTI_DISCRETE,
-        reset_func=make_reset_function(static_env_params),
     )
 
     seed = config["seed"]
     print("seed", seed)
     rng = jax.random.PRNGKey(seed)
-    outer_timer = tmr()
     editor = Editor(env, env_params, config, upscale=config["upscale"])
-    time_e = tmr()
-    print("Took {:2f}s to create editor".format(time_e - outer_timer))
 
     clock = pygame.time.Clock()
     while not editor.is_quit_requested():
         rng, _rng = jax.random.split(rng)
-        s = time.time()
         editor.update(_rng)
-        e = time.time()
-        # print("Took {:4f}s to update".format(e - s))
         clock.tick(config["fps"])
 
 
