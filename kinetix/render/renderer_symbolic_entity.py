@@ -1,17 +1,14 @@
-from cmath import rect
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 from flax import struct
 from jax2d.engine import get_pairwise_interaction_indices
+
 from kinetix.environment.env_state import EnvState
 from kinetix.render.renderer_symbolic_common import (
     make_circle_features,
     make_joint_features,
     make_polygon_features,
     make_thruster_features,
-    make_unified_shape_features,
 )
 
 
@@ -33,7 +30,7 @@ class EntityObservation:
     thruster_indexes: jnp.ndarray
 
 
-def make_render_entities(params, static_params):
+def make_render_entities(env_params, static_params, ignore_attention_mask=False):
     _, _, _, circle_circle_pairs, circle_rect_pairs, rect_rect_pairs = get_pairwise_interaction_indices(static_params)
     circle_rect_pairs = circle_rect_pairs.at[:, 0].add(static_params.num_polygons)
     circle_circle_pairs = circle_circle_pairs + static_params.num_polygons
@@ -41,11 +38,11 @@ def make_render_entities(params, static_params):
     def render_entities(state: EnvState):
         state = jax.tree_util.tree_map(lambda x: jnp.nan_to_num(x), state)
 
-        joint_features, joint_indexes, joint_mask = make_joint_features(state, params, static_params)
-        thruster_features, thruster_indexes, thruster_mask = make_thruster_features(state, params, static_params)
+        joint_features, joint_indexes, joint_mask = make_joint_features(state, env_params, static_params)
+        thruster_features, thruster_indexes, thruster_mask = make_thruster_features(state, env_params, static_params)
 
-        poly_nodes, poly_mask = make_polygon_features(state, params, static_params)
-        circle_nodes, circle_mask = make_circle_features(state, params, static_params)
+        poly_nodes, poly_mask = make_polygon_features(state, env_params, static_params)
+        circle_nodes, circle_mask = make_circle_features(state, env_params, static_params)
 
         def _add_grav(nodes):
             return jnp.concatenate(
@@ -102,7 +99,10 @@ def make_render_entities(params, static_params):
                 axis=0,
             )
 
-        mask_n_squared = make_n_squared_mask(mask_flat_shapes)
+        if ignore_attention_mask:
+            mask_n_squared = None
+        else:
+            mask_n_squared = make_n_squared_mask(mask_flat_shapes)
 
         return EntityObservation(
             circles=circle_nodes,

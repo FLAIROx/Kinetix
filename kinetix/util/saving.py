@@ -1,35 +1,26 @@
+import bz2
 import json
 import os
 import pickle
 from typing import Any, Dict, Union
 
-import flax.serialization
-import flax.serialization
-import flax.serialization
-import flax.serialization
-import flax.serialization
-import flax.serialization
+import flax
 import flax.serialization
 import jax
 import jax.numpy as jnp
-import flax
-import wandb
+from flax.traverse_util import unflatten_dict
 from jax2d.engine import (
     calculate_collision_matrix,
     get_empty_collision_manifolds,
     get_pairwise_interaction_indices,
     recalculate_mass_and_inertia,
 )
-from jax2d.sim_state import RigidBody, SimState
-from kinetix.environment.env_state import EnvState, StaticEnvParams, EnvParams
+from jax2d.sim_state import SimState
+from safetensors.flax import load_file
 
-from flax.traverse_util import flatten_dict, unflatten_dict
-
-from safetensors.flax import save_file, load_file
-
-from kinetix.pcg.pcg import env_state_to_pcg_state
-from kinetix.pcg.pcg_state import PCGState
-import bz2
+import wandb
+from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
+from kinetix.environment.utils import create_empty_env
 
 
 def check_if_mass_and_inertia_are_correct(state: SimState, env_params: EnvParams, static_params):
@@ -57,11 +48,6 @@ def check_if_mass_and_inertia_are_correct(state: SimState, env_params: EnvParams
 def save_pickle(filename, state):
     with open(filename, "wb") as f:
         pickle.dump(state, f)
-
-
-def load_pcg_state_pickle(filename):
-    with open(filename, "rb") as f:
-        return pickle.load(f)
 
 
 def expand_env_state(env_state: EnvState, static_env_params: StaticEnvParams, ignore_collision_matrix=False):
@@ -159,38 +145,13 @@ def expand_env_state(env_state: EnvState, static_env_params: StaticEnvParams, ig
     return env_state
 
 
-def expand_pcg_state(pcg_state: PCGState, static_env_params):
-    new_pcg_state = pcg_state.replace(
-        env_state=expand_env_state(pcg_state.env_state, static_env_params),
-        env_state_max=expand_env_state(pcg_state.env_state_max, static_env_params),
-        env_state_pcg_mask=expand_env_state(
-            pcg_state.env_state_pcg_mask, static_env_params, ignore_collision_matrix=True
-        ),
-    )
-    new_pcg_state = new_pcg_state.replace(
-        env_state_pcg_mask=new_pcg_state.env_state_pcg_mask.replace(
-            collision_matrix=jnp.zeros_like(new_pcg_state.env_state.collision_matrix, dtype=bool),
-        )
-    )
-    num_shapes = new_pcg_state.env_state.polygon.active.shape[0] + new_pcg_state.env_state.circle.active.shape[0]
-
-    return new_pcg_state.replace(
-        tied_together=jnp.zeros((num_shapes, num_shapes), dtype=bool)
-        .at[
-            : pcg_state.tied_together.shape[0],
-            : pcg_state.tied_together.shape[1],
-        ]
-        .set(pcg_state.tied_together)
-    )
-
-
-def load_world_state_pickle(filename, params=None, static_env_params=None):
+def load_world_state_pickle(filename, env_params=None, static_env_params=None):
     static_params = static_env_params or StaticEnvParams()
     with open(filename, "rb") as f:
         state: SimState = pickle.load(f)
         state = jax.tree.map(lambda x: jnp.nan_to_num(x), state)
         # Check if the mass and inertia are reasonable.
-        check_if_mass_and_inertia_are_correct(state, params or EnvParams(), static_params)
+        check_if_mass_and_inertia_are_correct(state, env_params or EnvParams(), static_params)
 
     # Now check if the shapes are correct
     return expand_env_state(state, static_params)
@@ -202,9 +163,11 @@ def stack_list_of_pytrees(list_of_pytrees):
         v = jax.tree_map(lambda x, y: jnp.concatenate([x, jnp.expand_dims(y, 0)], axis=0), v, l)
     return v
 
-def get_pcg_state_from_json(json_filename) -> PCGState:
+
+def get_env_state_from_json(json_filename) -> EnvState:
     env_state, _, _ = load_from_json_file(json_filename)
-    return env_state_to_pcg_state(env_state)
+    return env_state
+
 
 def my_load_file(filename):
     data = bz2.BZ2File(filename, "rb")
@@ -221,18 +184,14 @@ def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
     my_save_file(params, filename)
 
 
-def load_params(filename: Union[str, os.PathLike], legacy=False) -> Dict:
-    if legacy:
-        filename = filename.replace("full_model.pbz2", "model.safetensors")
-        filename = filename.replace(".pbz2", ".safetensors")
-        return unflatten_dict(load_file(filename), sep=",")
+def load_params(filename: Union[str, os.PathLike]) -> Dict:
     return my_load_file(filename)
 
 
-def load_params_from_wandb_artifact_path(checkpoint_name, legacy=False):
+def load_params_from_wandb_artifact_path(checkpoint_name):
     api = wandb.Api()
     name = api.artifact(checkpoint_name).download()
-    network_params = load_params(name + "/model.pbz2", legacy=legacy)
+    network_params = load_params(name + "/model.pbz2")
     return network_params
 
 
@@ -259,12 +218,10 @@ def load_params_wandb_artifact_path_full_model(checkpoint_name):
     return all_dict["params"]
 
 
-def load_train_state_from_wandb_artifact_path(train_state, checkpoint_name, load_only_params=False, legacy=False):
+def load_train_state_from_wandb_artifact_path(train_state, checkpoint_name, load_only_params=False):
     api = wandb.Api()
     name = api.artifact(checkpoint_name).download()
-    all_dict = load_params(name + "/full_model.pbz2", legacy=legacy)
-    if legacy:
-        return train_state.replace(params=all_dict)
+    all_dict = load_params(name + "/full_model.pbz2")
     train_state = train_state.replace(params=all_dict["params"])
     if not load_only_params:
         train_state = train_state.replace(
@@ -275,10 +232,10 @@ def load_train_state_from_wandb_artifact_path(train_state, checkpoint_name, load
 
 
 def save_params_to_wandb(params, timesteps, config):
-    return save_dict_to_wandb(params, timesteps, config, "params")
+    return save_dict(params, timesteps, config, "params")
 
 
-def save_dict_to_wandb(dict, timesteps, config, name):
+def save_dict(dict, timesteps, config, name, save_to_wandb: bool = True):
     timesteps = str(round(timesteps / 1e9)) + "B"
     run_name = config["run_name"] + "-" + str(config["random_hash"]) + "-" + str(timesteps)
     save_dir = os.path.join(config["save_path"], run_name)
@@ -286,27 +243,26 @@ def save_dict_to_wandb(dict, timesteps, config, name):
     save_params(dict, f"{save_dir}/{name}.pbz2")
 
     # upload this to wandb as an artifact
-    artifact = wandb.Artifact(f"{run_name}-checkpoint", type="checkpoint")
-    artifact.add_file(f"{save_dir}/{name}.pbz2")
-    artifact.save()
+    if save_to_wandb:
+        artifact = wandb.Artifact(f"{run_name}-checkpoint", type="checkpoint")
+        artifact.add_file(f"{save_dir}/{name}.pbz2")
+        artifact.save()
     print(f"Parameters of model saved in {save_dir}/{name}.pbz2")
 
 
-def save_model_to_wandb(train_state, timesteps, config, is_final=False):
+def save_model(train_state, timesteps, config, is_final=False, save_to_wandb: bool = True):
     dict_to_use = {"step": train_state.step, "params": train_state.params, "opt_state": train_state.opt_state}
     step = int(train_state.step)
     if config["economical_saving"]:
         if step in [2048, 10240, 40960, 81920] or is_final:
-            save_dict_to_wandb(dict_to_use, timesteps, config, "full_model")
+            save_dict(dict_to_use, timesteps, config, "full_model", save_to_wandb=save_to_wandb)
         else:
             print("Not saving model because step is", step)
     else:
-        save_dict_to_wandb(dict_to_use, timesteps, config, "full_model")
+        save_dict(dict_to_use, timesteps, config, "full_model", save_to_wandb=save_to_wandb)
 
 
 def import_env_state_from_json(json_file: dict[str, Any]) -> tuple[EnvState, StaticEnvParams, EnvParams]:
-    from kinetix.environment.env import create_empty_env
-
     def normalise(k, v):
         if k == "screen_dim":
             return v
@@ -532,6 +488,9 @@ def export_env_state_to_json(
 
 
 def load_from_json_file(filename):
+    assert os.path.exists(
+        filename
+    ), f"File {filename} does not exist. If you are loading an environment, ensure the path is relative to the worlds/ directory, e.g. include the m/ prefix."
     with open(filename, "r") as f:
         return import_env_state_from_json(json.load(f))
 

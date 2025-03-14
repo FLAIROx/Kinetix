@@ -1,6 +1,7 @@
 import jax
-from jax2d.sim_state import RigidBody
 import jax.numpy as jnp
+from jax2d.sim_state import RigidBody
+
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
 
 

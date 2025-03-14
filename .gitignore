@@ -192,3 +192,4 @@ log*_*
 kinetix/analysis/test*.py
 slurm-*.out
 results/
+run_docker.sh

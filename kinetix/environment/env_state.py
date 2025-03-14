@@ -1,8 +1,6 @@
-from dataclasses import field
 import jax.numpy as jnp
 from flax import struct
-
-from jax2d.sim_state import SimState, SimParams, StaticSimParams
+from jax2d.sim_state import SimParams, SimState, StaticSimParams
 
 
 @struct.dataclass
@@ -21,6 +19,8 @@ class EnvState(SimState):
     circle_densities: jnp.ndarray
 
     timestep: int = 0
+
+    last_distance: float = -1.0
 
 
 @struct.dataclass

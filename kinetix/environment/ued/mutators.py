@@ -1,46 +1,40 @@
-from functools import partial
 import math
+from functools import partial
 
-import chex
 import jax
 import jax.numpy as jnp
-from flax.serialization import to_state_dict
 from jax2d.engine import (
-    PhysicsEngine,
-    calculate_collision_matrix,
-    calc_inverse_mass_polygon,
-    calc_inverse_mass_circle,
     calc_inverse_inertia_circle,
     calc_inverse_inertia_polygon,
+    calc_inverse_mass_circle,
+    calc_inverse_mass_polygon,
+    calculate_collision_matrix,
     recalculate_mass_and_inertia,
     select_shape,
 )
-from jax2d.sim_state import SimState, RigidBody, Joint, Thruster
 from jax2d.maths import rmat
+from jax2d.sim_state import Joint, RigidBody, Thruster
+
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
 from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.ued.util import (
-    count_roles,
-    is_space_for_joint,
-    make_velocities_zero,
-    sample_dimensions,
-    random_position_on_polygon,
-    random_position_on_circle,
-    get_role,
-    is_space_for_shape,
     are_there_shapes_present,
+    count_roles,
+    get_role,
+    is_space_for_joint,
+    is_space_for_shape,
+    make_do_dummy_step,
+    random_position_on_circle,
+    random_position_on_polygon,
+    sample_dimensions,
 )
-from kinetix.util.saving import load_world_state_pickle
-from flax import struct
-from kinetix.environment.env import create_empty_env
-from kinetix.environment.ued.util import make_do_dummy_step
 
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_add_shape(
     rng,
     state: EnvState,
-    params: EnvParams,
+    env_params: EnvParams,
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_no_fixate: bool = False,
@@ -80,8 +74,8 @@ def mutate_add_shape(
         largest = jnp.max(jnp.array([half_dimensions[0] * jnp.sqrt(2), half_dimensions[1] * jnp.sqrt(2), radius]))
 
         screen_dim_world = (
-            static_env_params.screen_dim[0] / params.pixels_per_unit,
-            static_env_params.screen_dim[1] / params.pixels_per_unit,
+            static_env_params.screen_dim[0] / env_params.pixels_per_unit,
+            static_env_params.screen_dim[1] / env_params.pixels_per_unit,
         )
         min_x = largest
         max_x = screen_dim_world[0] - largest
@@ -146,8 +140,7 @@ def mutate_add_shape(
         )
         is_forcing_bottom = jax.random.uniform(_rngs[8]) < fixate_shape_bottom_bias
 
-
-        half_screen_height = (static_env_params.screen_dim[1] / params.pixels_per_unit) / 2.0
+        half_screen_height = (static_env_params.screen_dim[1] / env_params.pixels_per_unit) / 2.0
         position = jax.lax.select(
             is_fixated & is_forcing_bottom & (position[1] >= half_screen_height),
             position.at[1].add(-half_screen_height),
@@ -200,7 +193,7 @@ def mutate_add_shape(
 def mutate_add_connected_shape(
     rng,
     state: EnvState,
-    params: EnvParams,
+    env_params: EnvParams,
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_rjoint: bool = False,
@@ -606,17 +599,19 @@ def mutate_add_connected_shape(
 def mutate_add_connected_shape_proper(
     rng,
     state: EnvState,
-    params: EnvParams,
+    env_params: EnvParams,
     static_env_params: StaticEnvParams,
     ued_params: UEDParams,
     force_rjoint: bool = False,
 ):
-    return mutate_add_connected_shape(rng, state, params, static_env_params, ued_params, force_rjoint=force_rjoint)[0]
+    return mutate_add_connected_shape(rng, state, env_params, static_env_params, ued_params, force_rjoint=force_rjoint)[
+        0
+    ]
 
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_remove_shape(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
 
     can_remove_mask = (
@@ -666,7 +661,7 @@ def mutate_remove_shape(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_remove_joint(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     can_remove_mask = state.joint.active
 
@@ -688,7 +683,7 @@ def mutate_remove_joint(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_swap_role(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     def _cr(*args):
         return count_roles(*args, include_static_polys=False)
@@ -740,7 +735,7 @@ def mutate_swap_role(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_toggle_fixture(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     can_toggle_mask = (
         jnp.concatenate([state.polygon.active, state.circle.active])
@@ -808,7 +803,7 @@ def mutate_toggle_fixture(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_add_thruster(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     is_fixated = jnp.concatenate([state.polygon.inverse_mass == 0, state.circle.inverse_mass == 0])
     # is_fixated = jnp.zeros_like(is_fixated, dtype=bool)
@@ -885,7 +880,7 @@ def mutate_add_thruster(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_change_gravity(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     rng, _rng = jax.random.split(rng)
     rngs = jax.random.split(_rng, 2)
@@ -900,7 +895,7 @@ def mutate_change_gravity(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_remove_thruster(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     are_there_thrusters = state.thruster.active
 
@@ -917,12 +912,12 @@ def mutate_remove_thruster(
     return jax.lax.cond(are_there_thrusters.sum() > 0, do_remove, dummy, rng, state)
 
 
-def make_mutate_change_shape_size(params, static_env_params):
-    do_dummy_step = make_do_dummy_step(params, static_env_params)
+def make_mutate_change_shape_size(env_params, static_env_params):
+    do_dummy_step = make_do_dummy_step(env_params, static_env_params)
 
     @partial(jax.jit, static_argnums=(3, 4))
     def mutate_change_shape_size(
-        rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+        rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
     ):
         shape_active = jnp.concatenate(
             [state.polygon.active.at[: static_env_params.num_static_fixated_polys].set(False), state.circle.active]
@@ -993,7 +988,7 @@ def make_mutate_change_shape_size(params, static_env_params):
 
 @partial(jax.jit, static_argnums=(3, 4))
 def mutate_change_shape_location(
-    rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+    rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
 ):
     shape_active = jnp.concatenate(
         [state.polygon.active.at[: static_env_params.num_static_fixated_polys].set(False), state.circle.active]
@@ -1063,9 +1058,9 @@ def mutate_change_shape_location(
         )
 
         how_much_oob_x_left = jnp.maximum(0, 0 - min_x)
-        how_much_oob_x_right = jnp.maximum(0, max_x - static_env_params.screen_dim[0] / params.pixels_per_unit)
+        how_much_oob_x_right = jnp.maximum(0, max_x - static_env_params.screen_dim[0] / env_params.pixels_per_unit)
         how_much_oob_y_down = jnp.maximum(0, 0.4 - min_y)  # this is for the floor
-        how_much_oob_y_up = jnp.maximum(0, max_y - static_env_params.screen_dim[1] / params.pixels_per_unit)
+        how_much_oob_y_up = jnp.maximum(0, max_y - static_env_params.screen_dim[1] / env_params.pixels_per_unit)
 
         # correct by out of bounds factor
         positions = (
@@ -1092,12 +1087,12 @@ def mutate_change_shape_location(
     return jax.lax.cond(shape_active.sum() > 0, do_change, dummy, rng, state)
 
 
-def make_mutate_change_shape_rotation(params, static_env_params):
-    do_dummy_step = make_do_dummy_step(params, static_env_params)
+def make_mutate_change_shape_rotation(env_params, static_env_params):
+    do_dummy_step = make_do_dummy_step(env_params, static_env_params)
 
     @partial(jax.jit, static_argnums=(3, 4))
     def mutate_change_shape_rotation(
-        rng, state: EnvState, params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
+        rng, state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams, ued_params: UEDParams
     ):
         shape_active = jnp.concatenate(
             [state.polygon.active.at[: static_env_params.num_static_fixated_polys].set(False), state.circle.active]
