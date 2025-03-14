@@ -38,7 +38,7 @@ def get_eval_levels(eval_levels, static_env_params):
     should_permute = [".permute" in l for l in eval_levels]
     eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
 
-    ls = [get_env_state_from_json(get_correct_path_of_json_level(l)) for l in eval_levels]
+    ls = [get_env_state_from_json(l) for l in eval_levels]
     ls = [expand_env_state(l, static_env_params) for l in ls]
     new_ls = []
     rng = jax.random.PRNGKey(0)
@@ -515,6 +515,7 @@ def export_env_state_to_json(
 
 
 def load_from_json_file(filename):
+    filename = get_correct_path_of_json_level(filename)
     assert os.path.exists(
         filename
     ), f"File {filename} does not exist. Please ensure the path exists from where you are running your script. Alternatively, please provide an absolute path"
