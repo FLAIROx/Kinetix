@@ -47,14 +47,7 @@ def make_train(config, env_params, static_env_params):
 
     def make_env(reset_fn):
         return LogWrapper(
-            make_kinetix_env(
-                config["action_type"],
-                config["observation_type"],
-                reset_fn,
-                env_params,
-                static_env_params,
-                ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
-            )
+            make_kinetix_env(config["action_type"], config["observation_type"], reset_fn, env_params, static_env_params)
         )
 
     env = make_env(make_reset_fn_from_config(config, env_params, static_env_params))

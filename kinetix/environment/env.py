@@ -259,7 +259,6 @@ def make_kinetix_env(
     reset_fn: Optional[Callable[[chex.PRNGKey], EnvState]],
     env_params: Optional[EnvParams] = None,
     static_env_params: Optional[StaticEnvParams] = None,
-    ignore_mask_in_obs: bool = False,
 ) -> KinetixEnv:
     """
 
@@ -288,7 +287,6 @@ def make_kinetix_env(
     else:
         raise ValueError(f"Invalid action_type '{action_type}', must be one of: [DISCRETE, CONTINUOUS, MULTI_DISCRETE]")
     action_type = action_type_cls(env_params, static_env_params)
-    obs_kws = {}
     # observations
     if observation_type == ObservationType.PIXELS:
         obs_type_cls = PixelObservations
@@ -296,14 +294,13 @@ def make_kinetix_env(
         obs_type_cls = SymbolicObservations
     elif observation_type == ObservationType.SYMBOLIC_ENTITY:
         obs_type_cls = EntityObservations
-        obs_kws = {"ignore_mask": ignore_mask_in_obs}
     elif observation_type == ObservationType.SYMBOLIC_FLAT_PADDED:
         obs_type_cls = SymbolicPaddedObservations
     else:
         raise ValueError(
             f"Invalid observation_type '{observation_type}', must be one of: [pixels, symbolic_flat, symbolic_entity, symbolic_flat_padded]"
         )
-    obs_type = obs_type_cls(env_params, static_env_params, **obs_kws)
+    obs_type = obs_type_cls(env_params, static_env_params)
 
     return KinetixEnv(
         action_type=action_type,

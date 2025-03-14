@@ -29,14 +29,7 @@ def main(config):
     env_params, static_env_params = generate_params_from_config(config)
 
     env = LogWrapper(
-        make_kinetix_env(
-            config["action_type"],
-            config["observation_type"],
-            None,
-            env_params,
-            static_env_params,
-            ignore_mask_in_obs=config.get("permutation_invariant_mlp", False),
-        )
+        make_kinetix_env(config["action_type"], config["observation_type"], None, env_params, static_env_params)
     )
 
     eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)

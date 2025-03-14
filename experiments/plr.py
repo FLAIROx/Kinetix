@@ -455,12 +455,7 @@ def main(config=None):
     def make_env(static_env_params):
         env = LogWrapper(
             make_kinetix_env(
-                config_for_env["action_type"],
-                config_for_env["observation_type"],
-                None,
-                env_params,
-                static_env_params,
-                ignore_mask_in_obs=config_for_env.get("permutation_invariant_mlp", False),
+                config_for_env["action_type"], config_for_env["observation_type"], None, env_params, static_env_params
             )
         )
         return env
