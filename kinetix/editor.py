@@ -293,22 +293,12 @@ class Editor:
             self.apply_fn = jax.jit(self.network.apply)
 
         # JIT Compile
-        def _jit_step():
-            rng = jax.random.PRNGKey(0)
-            ans = self._step_fn(
-                rng,
-                self.env.reset(rng, self.env_params, self.play_state)[1],
-                jnp.zeros(
-                    env.static_env_params.num_motor_bindings + env.static_env_params.num_thruster_bindings, dtype=int
-                ),
-                self.env_params,
-            )
 
         def _jit_render():
             self._render_fn(self.play_state)
             self._render_fn_edit(self.play_state)
 
-        time_function(_jit_step, "_jit_step")
+        time_function(self._jit_step, "_jit_step")
         time_function(_jit_render, "_jit_render")
 
         # self._step_fn(rng, self.play_state, 0, self.env_params)
@@ -387,6 +377,19 @@ class Editor:
         state = self.play_state
         for mutation_fn in ALL_MUTATION_FNS:
             mutation_fn(jax.random.PRNGKey(0), state, self.env_params, self.static_env_params, self.ued_params)
+
+    def _jit_step(self, env_state: EnvState = None):
+        rng = jax.random.PRNGKey(0)
+        state_to_use = env_state if env_state is not None else self.play_state
+        self._step_fn = self._step_fn.lower(
+            rng,
+            self.env.reset(rng, self.env_params, state_to_use)[1],
+            jnp.zeros(
+                self.env.static_env_params.num_motor_bindings + self.env.static_env_params.num_thruster_bindings,
+                dtype=jnp.int32,
+            ),
+            self.env_params,
+        ).compile()
 
     def update(self, rng):
         # Update pygame events
@@ -1210,7 +1213,7 @@ class Editor:
                         self._reset_select_shape(env_state)
                         if filename.endswith(".json"):
                             env_state, new_static_env_params, new_env_params = load_from_json_file(filename)
-                            self._update_params(new_static_env_params, new_env_params)
+                            self._update_params(new_static_env_params, new_env_params, env_state=env_state)
                     self._reset_triangles()
                 elif event.key == pygame.K_n and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                     self._reset_select_shape(env_state)
@@ -1307,7 +1310,9 @@ class Editor:
         )
         return env_state
 
-    def _update_params(self, new_static_env_params: StaticEnvParams, new_env_params: EnvParams):
+    def _update_params(
+        self, new_static_env_params: StaticEnvParams, new_env_params: EnvParams, env_state: EnvState = None
+    ):
         self.static_env_params = new_static_env_params.replace(
             frame_skip=self.config["frame_skip"], downscale=self.config["downscale"]
         )
@@ -1320,6 +1325,8 @@ class Editor:
             self.static_env_params,
         )
         self._setup_rendering(self.static_env_params, self.env_params)
+        self._step_fn = jax.jit(self.env.step)
+        self._jit_step(env_state)  # jit so that it doesn't take a long time when pressing play
 
     def _discard_shape_being_created(self, env_state):
         if self.creating_shape:
