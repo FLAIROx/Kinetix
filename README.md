@@ -1,5 +1,5 @@
 <p align="middle">
-  <img src="images/kinetix_logo.gif" width="500" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/kinetix_logo.gif" width="500" />
 </p>
 
 <p align="center">
@@ -27,14 +27,14 @@ We use Kinetix to investigate the training of large, general reinforcement learn
 You can play with Kinetix in our [online editor](https://kinetix-env.github.io/gallery.html?editor=true), or have a look at the JAX [physics engine](https://github.com/MichaelTMatthews/Jax2D) and [graphics library](https://github.com/FLAIROx/JaxGL) we made for Kinetix. Finally, see our [docs](./docs/README.md) for more information and more in-depth examples.
 
 <p align="middle">
-  <img src="images/bb.gif" width="200" />
-  <img src="images/cartpole.gif" width="200" />
-  <img src="images/grasper.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/bb.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/cartpole.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/grasper.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/hc.gif" width="200" />
-  <img src="images/hopper.gif" width="200" />
-  <img src="images/ll.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/hc.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/hopper.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/ll.gif" width="200" />
 </p>
 
 <p align="middle">
@@ -50,14 +50,14 @@ Every task has the same goal: make the <span style="color:green">green</span> an
 The agent can act through applying torque via motors and force via thrusters.
 
 <p align="middle">
-  <img src="images/random_1.gif" width="200" />
-  <img src="images/random_5.gif" width="200" />
-  <img src="images/random_3.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_1.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_5.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_3.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/random_4.gif" width="200" />
-  <img src="images/random_6.gif" width="200" />
-  <img src="images/random_7.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_4.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_6.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_7.gif" width="200" />
 </p>
 
 <p align="middle">
@@ -68,14 +68,14 @@ We then investigate the transfer capabilities of this agent to unseen handmade l
 We find that the agent can zero-shot simple physics problems, but still struggles with harder tasks.
 
 <p align="middle">
-  <img src="images/general_1.gif" width="200" />
-  <img src="images/general_2.gif" width="200" />
-  <img src="images/general_3.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_1.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_2.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_3.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/general_4.gif" width="200" />
-  <img src="images/general_5.gif" width="200" />
-  <img src="images/general_6.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_4.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_5.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_6.gif" width="200" />
 </p>
 
 <p align="middle">
