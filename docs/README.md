@@ -95,14 +95,14 @@ The following two images show the main editor page, and then the level I designe
 </p>
 
 ### Step 2 - Export It
-Once you are satisfied with your level, you can download it as a json file by using the button on the bottom left. Once this is downloaded, move it to `/path/to/repo/worlds/custom/my_custom_level.json`.
+Once you are satisfied with your level, you can download it as a json file by using the button on the bottom left. Once this is downloaded, move it to `/path/to/repo/levels/custom/my_custom_level.json`.
 
 
 ### Step 3 - Import It
 In python, you can import the level as follows, see `examples/example_premade_level_replay.py` for an example.
 ```python
 from kinetix.util.saving import load_from_json_file
-level, static_env_params, env_params = load_from_json_file("/path/to/repo/worlds/custom/my_custom_level.json")
+level, static_env_params, env_params = load_from_json_file("/path/to/repo/levels/custom/my_custom_level.json")
 ```
 
 ### Step 4 - Train
@@ -110,9 +110,9 @@ You can use the above if you want to import the level and play around with it. I
 
 ```commandline
 python3 experiments/ppo.py env_size=custom \
-                           env_size.custom_path=/path/to/repo/worlds/custom/my_custom_level.json \
+                           env_size.custom_path=/path/to/repo/levels/custom/my_custom_level.json \
                            train_levels=s \
-                           train_levels.train_levels_list='["/path/to/repo/worlds/custom/my_custom_level.json"]' \
+                           train_levels.train_levels_list='["/path/to/repo/levels/custom/my_custom_level.json"]' \
                            eval=eval_auto
 ```
 

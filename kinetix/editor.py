@@ -171,7 +171,7 @@ def snap_to_circle_center_line(circle: RigidBody, position: jnp.ndarray):
 
 
 def prompt_file(save=False):
-    dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kinetix/worlds")
+    dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kinetix/levels")
     """Create a Tk file dialog and cleanup when finished"""
     top = tkinter.Tk()
     top.withdraw()  # hide window
@@ -215,7 +215,7 @@ def new_env(static_env_params):
     if EMPTY_ENV:
         env_state = create_empty_env(static_env_params)
     else:
-        env_state = get_env_state_from_json("kinetix/worlds/l/h0_angrybirds.json")
+        env_state = get_env_state_from_json("kinetix/levels/l/h0_angrybirds.json")
     return env_state
 
 

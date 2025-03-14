@@ -126,7 +126,7 @@ To install Kinetix with a CUDA-enabled JAX backend (tested with python3.10):
 ```commandline
 git clone https://github.com/FlairOx/Kinetix.git
 cd Kinetix
-pip install -e .
+pip install -e ".[dev]"
 pre-commit install
 ```
 
@@ -186,7 +186,7 @@ python3 experiments/ppo.py train_levels=random
 ### Training on a single hand-designed level
 
 > [!NOTE]
-> Check the `kinetix/worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `kinetix/worlds/` directory
+> Check the `kinetix/levels/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `kinetix/levels/` directory
 
 ```commandline
 python3 experiments/ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'

@@ -23,7 +23,7 @@ import wandb
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
 from kinetix.environment.utils import create_empty_env, permute_state
 
-BASE_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "worlds"))
+BASE_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "levels"))
 
 
 def get_correct_path_of_json_level(l: str):
