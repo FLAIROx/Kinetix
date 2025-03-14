@@ -3,7 +3,7 @@ requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kinetix"
+name = "kinetix-env"
 version = "1.0.0"
 authors = [
   { name="Michael Matthews", email="michael.matthews@eng.ox.ac.uk" },
@@ -23,8 +23,6 @@ dependencies = [
     "optax",
     "flax==0.10.4",
     "numpy==1.26.4",
-    "black",
-    "pre-commit",
     "argparse",
     "wandb",
     "orbax-checkpoint",
@@ -39,10 +37,15 @@ dependencies = [
     "pygame_widgets==1.1.5",
     "jaxgl",
     "jax2d==1.0.1",
-    "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
     "moviepy==1.0.3",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
+  "black",
+  "pre-commit",
+]
 
 [project.urls]
 Homepage = "https://github.com/FLAIROx/Kinetix"

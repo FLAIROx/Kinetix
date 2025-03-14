@@ -11,7 +11,7 @@ from kinetix.util import load_from_json_file
 
 def main():
     # Load a premade level
-    level, static_env_params, env_params = load_from_json_file("worlds/l/grasp_easy.json")
+    level, static_env_params, env_params = load_from_json_file("l/grasp_easy.json")
 
     # Create the environment
     env = make_kinetix_env(
