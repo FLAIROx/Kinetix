@@ -186,7 +186,7 @@ python3 experiments/ppo.py train_levels=random
 ### Training on a single hand-designed level
 
 > [!NOTE]
-> Check the `worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `worlds/` directory
+> Check the `kinetix/worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `kinetix/worlds/` directory
 
 ```commandline
 python3 experiments/ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'

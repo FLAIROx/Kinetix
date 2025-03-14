@@ -1,5 +1,5 @@
 import os
-import re
+from posixpath import isabs
 from functools import partial
 from typing import Tuple
 
@@ -9,40 +9,7 @@ import jax.numpy as jnp
 from flax.training.train_state import TrainState
 from jaxued.environments.underspecified_env import EnvParams, EnvState, Observation, UnderspecifiedEnv
 
-from kinetix.environment.utils import permute_state
 from kinetix.models.actor_critic import ScannedRNN
-from kinetix.util.saving import expand_env_state, get_env_state_from_json, stack_list_of_pytrees
-
-BASE_DIR = "worlds"
-
-DEFAULT_EVAL_LEVELS = [
-    "easy.cartpole",
-    "easy.flappy_bird",
-    "easy.unicycle",
-    "easy.car_left",
-    "easy.car_right",
-    "easy.pinball",
-    "easy.swing_up",
-    "easy.thruster",
-]
-
-
-def get_eval_levels(eval_levels, static_env_params):
-    should_permute = [".permute" in l for l in eval_levels]
-    eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
-    ls = [
-        get_env_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json")))
-        for l in eval_levels
-    ]
-    ls = [expand_env_state(l, static_env_params) for l in ls]
-    new_ls = []
-    rng = jax.random.PRNGKey(0)
-    for sp, l in zip(should_permute, ls):
-        rng, _rng = jax.random.split(rng)
-        if sp:
-            l = permute_state(_rng, l, static_env_params)
-        new_ls.append(l)
-    return stack_list_of_pytrees(new_ls)
 
 
 def evaluate_rnn(  # from jaxued

@@ -16,7 +16,7 @@ import wandb
 from kinetix.environment.env_state import EnvParams, StaticEnvParams
 from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.utils import ActionType, ObservationType
-from kinetix.util.saving import load_from_json_file
+from kinetix.util.saving import get_correct_path_of_json_level, load_from_json_file
 
 
 def get_hash_without_seed(config):
@@ -34,7 +34,7 @@ def get_date() -> str:
 def generate_params_from_config(config):
     if config.get("env_size_type", "predefined") == "custom":
         # must load env params from a file
-        _, static_env_params, env_params = load_from_json_file(os.path.join("worlds", config["custom_path"]))
+        _, static_env_params, env_params = load_from_json_file(get_correct_path_of_json_level(config["custom_path"]))
         return env_params, static_env_params.replace(
             frame_skip=config["frame_skip"],
         )
