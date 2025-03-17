@@ -20,7 +20,7 @@ from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util import (
     general_eval,
     generate_params_from_config,
-    get_eval_levels,
+    load_evaluation_levels,
     get_video_frequency,
     init_wandb,
     load_train_state_from_wandb_artifact_path,
@@ -45,13 +45,14 @@ def make_train(config, env_params, static_env_params):
     config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
     config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
 
-    def make_env(reset_fn):
+    def make_env(reset_fn, static_env_params):
         return LogWrapper(
             make_kinetix_env(config["action_type"], config["observation_type"], reset_fn, env_params, static_env_params)
         )
 
-    env = make_env(make_reset_fn_from_config(config, env_params, static_env_params))
-    eval_env = make_env(None)
+    eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
+    env = make_env(make_reset_fn_from_config(config, env_params, static_env_params), static_env_params)
+    eval_env = make_env(None, eval_static_env_params)
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]
@@ -118,10 +119,9 @@ def make_train(config, env_params, static_env_params):
         rng, _rng = jax.random.split(rng)
         obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
         init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
-        render_static_env_params = env.static_env_params.replace(downscale=4)
+        render_static_env_params = eval_env.static_env_params.replace(downscale=4)
         pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
         pixel_render_fn = lambda x: pixel_renderer(x) / 255.0
-        eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
 
         def _vmapped_eval_step(runner_state, rng):
             def _single_eval_step(rng):

@@ -193,14 +193,14 @@ python3 experiments/ppo.py train_levels=s train_levels.train_levels_list='["s/h4
 ```
 ### Training on a set of hand-designed levels
 ```commandline
-python3 experiments/ppo.py train_levels=s env_size=s eval_env_size=s
-# python3 experiments/ppo.py train_levels=m env_size=m  eval_env_size=m
-# python3 experiments/ppo.py train_levels=l env_size=l  eval_env_size=l
+python3 experiments/ppo.py train_levels=s env_size=s eval=eval_auto
+# python3 experiments/ppo.py train_levels=m env_size=m eval=eval_auto
+# python3 experiments/ppo.py train_levels=l env_size=l eval=eval_auto
 ```
 
 Or, on a custom set:
 ```commandline
-python3 experiments/ppo.py train_levels=l eval_env_size=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
+python3 experiments/ppo.py eval=eval_auto train_levels=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
 
 # ❌ Errata

@@ -3,6 +3,7 @@ import os
 import hydra
 import jax
 import jax.numpy as jnp
+from kinetix.util.saving import load_evaluation_levels
 import optax
 from flax.training.train_state import TrainState
 from omegaconf import OmegaConf
@@ -14,7 +15,6 @@ from kinetix.models import ScannedRNN, make_network_from_config
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util import (
     generate_params_from_config,
-    get_eval_levels,
     load_train_state_from_wandb_artifact_path,
     normalise_config,
 )
@@ -26,13 +26,13 @@ os.environ["WANDB_DISABLE_SERVICE"] = "True"
 @hydra.main(version_base=None, config_path="../configs", config_name="ppo")
 def main(config):
     config = normalise_config(OmegaConf.to_container(config), "PPO")
-    env_params, static_env_params = generate_params_from_config(config)
+    env_params, _ = generate_params_from_config(config)
+    eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
 
     env = LogWrapper(
-        make_kinetix_env(config["action_type"], config["observation_type"], None, env_params, static_env_params)
+        make_kinetix_env(config["action_type"], config["observation_type"], None, env_params, eval_static_env_params)
     )
 
-    eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
     # to keep the batch dimension
     NUM_ENVS_IN_PARALLEL = 1
     level_to_evaluate_on = jax.tree.map(lambda x: x[:NUM_ENVS_IN_PARALLEL], eval_levels)

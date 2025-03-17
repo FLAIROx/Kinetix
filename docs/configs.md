@@ -25,7 +25,6 @@ defaults:
     - ppo-rnn
   - misc: misc
   - eval: s
-  - eval_env_size: s
   - train_levels: random
   - model:
     - model-base
@@ -143,7 +142,6 @@ Which levels to train on.
 - `random`: Train on random levels
 #### Individual Subkeys
 - `train_level_mode`: "random" or "list"
-- `train_level_distribution`: if train_level_mode=random, this controls which distribution to use. By default `distribution_v3`
 - `train_levels_list`: This is a list of levels to train on.
 ### Model
 This controls the model architecture and options associated with that.

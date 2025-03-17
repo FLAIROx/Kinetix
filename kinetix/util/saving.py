@@ -34,20 +34,30 @@ def get_correct_path_of_json_level(l: str):
     return os.path.join(BASE_DIR, l)
 
 
-def get_eval_levels(eval_levels, static_env_params):
+def load_evaluation_levels(eval_levels: list[str], static_env_params_override=None) -> tuple[EnvState, StaticEnvParams]:
     should_permute = [".permute" in l for l in eval_levels]
     eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
 
-    ls = [get_env_state_from_json(l) for l in eval_levels]
-    ls = [expand_env_state(l, static_env_params) for l in ls]
-    new_ls = []
-    rng = jax.random.PRNGKey(0)
-    for sp, l in zip(should_permute, ls):
-        rng, _rng = jax.random.split(rng)
-        if sp:
-            l = permute_state(_rng, l, static_env_params)
-        new_ls.append(l)
-    return stack_list_of_pytrees(new_ls)
+    all_levels = []
+    all_static_env_params = []
+    for l in eval_levels:
+        env_state, static_env_params, _ = load_from_json_file(l)
+        all_levels.append(env_state)
+        all_static_env_params.append(static_env_params)
+
+    if static_env_params_override is not None:
+        biggest_static_env_params = static_env_params_override
+    else:
+        # get biggest static env params
+        biggest_static_env_params = jax.tree.map(lambda *x: max(x), *all_static_env_params)
+        print(f"Created static_env_params={static_env_params} when loading evaluation levels.")
+
+    all_levels = [expand_env_state(l, biggest_static_env_params) for l in all_levels]
+    _rngs = jax.random.split(jax.random.PRNGKey(0), len(all_levels))
+    new_ls = [
+        permute_state(_rng, l, static_env_params) if sp else l for sp, l, _rng in zip(should_permute, all_levels, _rngs)
+    ]
+    return stack_list_of_pytrees(new_ls), biggest_static_env_params
 
 
 def check_if_mass_and_inertia_are_correct(state: SimState, env_params: EnvParams, static_params):
