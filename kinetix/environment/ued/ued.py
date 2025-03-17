@@ -26,8 +26,7 @@ from kinetix.environment.ued.mutators import (
 )
 from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.utils import create_empty_env
-from kinetix.util.learning import get_eval_levels
-from kinetix.util.saving import load_world_state_pickle
+from kinetix.util.saving import load_world_state_pickle, get_eval_levels
 
 
 def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
