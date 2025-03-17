@@ -118,6 +118,7 @@ def normalise_config(config, name, editor_config=False):
 
         if config["eval_levels"] == ["auto"] or config["eval_levels"] == "auto":
             config["eval_levels"] = config["train_levels_list"]
+            config["eval_env_size_true"] = config["env_size"]
             print("Using Auto eval levels:", config["eval_levels"])
         config["num_eval_levels"] = len(config["eval_levels"])
 
