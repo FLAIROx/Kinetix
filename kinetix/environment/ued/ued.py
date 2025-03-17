@@ -140,7 +140,7 @@ def make_vmapped_filtered_level_sampler(
 
 def make_reset_fn_list_of_levels(levels, static_env_params):
     assert len(levels) > 0, "Need to provide at least one level to train on"
-    eval_levels = load_evaluation_levels(levels, static_env_params_override=static_env_params)
+    eval_levels, _ = load_evaluation_levels(levels, static_env_params_override=static_env_params)
 
     def reset(rng):
         rng, _rng = jax.random.split(rng)

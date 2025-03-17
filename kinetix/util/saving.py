@@ -50,6 +50,7 @@ def load_evaluation_levels(eval_levels: list[str], static_env_params_override=No
     else:
         # get biggest static env params
         biggest_static_env_params = jax.tree.map(lambda *x: max(x), *all_static_env_params)
+        print(f"Created static_env_params={static_env_params} when loading evaluation levels.")
 
     all_levels = [expand_env_state(l, biggest_static_env_params) for l in all_levels]
     _rngs = jax.random.split(jax.random.PRNGKey(0), len(all_levels))
