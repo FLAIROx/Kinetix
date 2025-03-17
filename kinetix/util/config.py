@@ -99,7 +99,6 @@ def normalise_config(config, name, editor_config=False):
         config[
             "env_name"
         ] = f"Kinetix-{config['observation_type_str'].title().replace('_', '')}-{config['action_type_str'].title().replace('_', '')}"
-        config["eval_env_size_true"] = config["eval_env_size"]
         if config["num_train_envs"] == 2048 and config["observation_type"] == ObservationType.PIXELS:
             config["num_train_envs"] = 512
         if "SFL" in name and config["env_size_name"] in ["m", "l"]:
@@ -118,7 +117,6 @@ def normalise_config(config, name, editor_config=False):
 
         if config["eval_levels"] == ["auto"] or config["eval_levels"] == "auto":
             config["eval_levels"] = config["train_levels_list"]
-            config["eval_env_size_true"] = config["env_size"]
             print("Using Auto eval levels:", config["eval_levels"])
         config["num_eval_levels"] = len(config["eval_levels"])
 

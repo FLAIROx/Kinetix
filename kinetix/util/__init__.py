@@ -13,6 +13,6 @@ from kinetix.util.saving import (
     export_env_state_to_json,
     get_env_state_from_json,
     save_pickle,
-    get_eval_levels,
+    load_evaluation_levels,
 )
 from kinetix.util.timing import time_function

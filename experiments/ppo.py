@@ -20,7 +20,7 @@ from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util import (
     general_eval,
     generate_params_from_config,
-    get_eval_levels,
+    load_evaluation_levels,
     get_video_frequency,
     init_wandb,
     load_train_state_from_wandb_artifact_path,
@@ -50,9 +50,7 @@ def make_train(config, env_params, static_env_params):
             make_kinetix_env(config["action_type"], config["observation_type"], reset_fn, env_params, static_env_params)
         )
 
-    _, eval_static_env_params = generate_params_from_config(
-        config["eval_env_size_true"] | {"frame_skip": config["frame_skip"]}
-    )
+    eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
     env = make_env(make_reset_fn_from_config(config, env_params, static_env_params), static_env_params)
     eval_env = make_env(None, eval_static_env_params)
 
@@ -124,7 +122,6 @@ def make_train(config, env_params, static_env_params):
         render_static_env_params = eval_env.static_env_params.replace(downscale=4)
         pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
         pixel_render_fn = lambda x: pixel_renderer(x) / 255.0
-        eval_levels = get_eval_levels(config["eval_levels"], eval_env.static_env_params)
 
         def _vmapped_eval_step(runner_state, rng):
             def _single_eval_step(rng):

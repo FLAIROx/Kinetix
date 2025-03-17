@@ -35,7 +35,7 @@ from kinetix.util import (
     general_eval,
     generate_params_from_config,
     get_eval_level_groups,
-    get_eval_levels,
+    load_evaluation_levels,
     get_video_frequency,
     init_wandb,
     load_train_state_from_wandb_artifact_path,
@@ -490,10 +490,7 @@ def main(config=None):
         sample_random_level, env_params, static_env_params, config, env=env
     )
 
-    _, eval_static_env_params = generate_params_from_config(
-        config["eval_env_size_true"]
-        | {"frame_skip": config["frame_skip"], "dense_reward_scale": config["dense_reward_scale"]}
-    )
+    all_eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
     eval_env = make_env(eval_static_env_params)
 
     mutate_world = make_mutate_env(static_env_params, env_params, ued_params)
@@ -601,7 +598,6 @@ def main(config=None):
             )
         return train_state
 
-    all_eval_levels = get_eval_levels(config["eval_levels"], eval_env.static_env_params)
     eval_group_indices = get_eval_level_groups(config["eval_levels"])
 
     @jax.jit

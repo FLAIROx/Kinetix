@@ -35,7 +35,7 @@ from kinetix.util import (
     general_eval,
     generate_params_from_config,
     get_eval_level_groups,
-    get_eval_levels,
+    load_evaluation_levels,
     init_wandb,
     load_train_state_from_wandb_artifact_path,
     normalise_config,
@@ -114,10 +114,10 @@ def main(config):
         sample_random_level, env_params, static_env_params, config, env=env
     )
 
-    _, eval_static_env_params = generate_params_from_config(
-        config["eval_env_size_true"]
-        | {"frame_skip": config["frame_skip"], "dense_reward_scale": config["dense_reward_scale"]}
-    )
+    num_eval_levels = len(config["eval_levels"])
+    all_eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
+    eval_group_indices = get_eval_level_groups(config["eval_levels"])
+
     eval_env = make_env(eval_static_env_params)
 
     def make_render_fn(static_env_params):
@@ -290,11 +290,6 @@ def main(config):
         rngs = jax.random.split(rng, 1)
         _, (learnability, success_by_env, _) = jax.lax.scan(batch_step, train_state, rngs, 1)
         return learnability[0], success_by_env[0]
-
-    num_eval_levels = len(config["eval_levels"])
-    all_eval_levels = get_eval_levels(config["eval_levels"], eval_env.static_env_params)
-
-    eval_group_indices = get_eval_level_groups(config["eval_levels"])
 
     def get_temp_metrics_from_learnability(learnability, success_rates, top_learn, top_success, make_full_nan=False):
         ans = {

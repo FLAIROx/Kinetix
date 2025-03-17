@@ -25,7 +25,6 @@ defaults:
     - ppo-rnn
   - misc: misc
   - eval: s
-  - eval_env_size: s
   - train_levels: random
   - model:
     - model-base
