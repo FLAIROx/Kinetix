@@ -118,10 +118,10 @@ def make_train(config, env_params, static_env_params):
         rng, _rng = jax.random.split(rng)
         obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
         init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
-        render_static_env_params = env.static_env_params.replace(downscale=4)
+        render_static_env_params = eval_env.static_env_params.replace(downscale=4)
         pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
         pixel_render_fn = lambda x: pixel_renderer(x) / 255.0
-        eval_levels = get_eval_levels(config["eval_levels"], env.static_env_params)
+        eval_levels = get_eval_levels(config["eval_levels"], eval_env.static_env_params)
 
         def _vmapped_eval_step(runner_state, rng):
             def _single_eval_step(rng):
