@@ -1,5 +1,5 @@
 <p align="middle">
-  <img src="images/kinetix_logo.gif" width="500" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/kinetix_logo.gif" width="500" />
 </p>
 
 <p align="center">
@@ -27,14 +27,14 @@ We use Kinetix to investigate the training of large, general reinforcement learn
 You can play with Kinetix in our [online editor](https://kinetix-env.github.io/gallery.html?editor=true), or have a look at the JAX [physics engine](https://github.com/MichaelTMatthews/Jax2D) and [graphics library](https://github.com/FLAIROx/JaxGL) we made for Kinetix. Finally, see our [docs](./docs/README.md) for more information and more in-depth examples.
 
 <p align="middle">
-  <img src="images/bb.gif" width="200" />
-  <img src="images/cartpole.gif" width="200" />
-  <img src="images/grasper.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/bb.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/cartpole.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/grasper.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/hc.gif" width="200" />
-  <img src="images/hopper.gif" width="200" />
-  <img src="images/ll.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/hc.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/hopper.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/ll.gif" width="200" />
 </p>
 
 <p align="middle">
@@ -50,14 +50,14 @@ Every task has the same goal: make the <span style="color:green">green</span> an
 The agent can act through applying torque via motors and force via thrusters.
 
 <p align="middle">
-  <img src="images/random_1.gif" width="200" />
-  <img src="images/random_5.gif" width="200" />
-  <img src="images/random_3.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_1.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_5.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_3.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/random_4.gif" width="200" />
-  <img src="images/random_6.gif" width="200" />
-  <img src="images/random_7.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_4.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_6.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/random_7.gif" width="200" />
 </p>
 
 <p align="middle">
@@ -68,14 +68,14 @@ We then investigate the transfer capabilities of this agent to unseen handmade l
 We find that the agent can zero-shot simple physics problems, but still struggles with harder tasks.
 
 <p align="middle">
-  <img src="images/general_1.gif" width="200" />
-  <img src="images/general_2.gif" width="200" />
-  <img src="images/general_3.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_1.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_2.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_3.gif" width="200" />
 </p>
 <p align="middle">
-  <img src="images/general_4.gif" width="200" />
-  <img src="images/general_5.gif" width="200" />
-  <img src="images/general_6.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_4.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_5.gif" width="200" />
+  <img src="https://raw.githubusercontent.com/FlairOX/Kinetix/main/images/general_6.gif" width="200" />
 </p>
 
 <p align="middle">
@@ -126,7 +126,7 @@ To install Kinetix with a CUDA-enabled JAX backend (tested with python3.10):
 ```commandline
 git clone https://github.com/FlairOx/Kinetix.git
 cd Kinetix
-pip install -e .
+pip install -e ".[dev]"
 pre-commit install
 ```
 
@@ -186,21 +186,21 @@ python3 experiments/ppo.py train_levels=random
 ### Training on a single hand-designed level
 
 > [!NOTE]
-> Check the `worlds/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `worlds/` directory
+> Check the `kinetix/levels/` folder for handmade levels for each size category. By default, the loading functions require a relative path to the `kinetix/levels/` directory
 
 ```commandline
 python3 experiments/ppo.py train_levels=s train_levels.train_levels_list='["s/h4_thrust_aim.json"]'
 ```
 ### Training on a set of hand-designed levels
 ```commandline
-python3 experiments/ppo.py train_levels=s env_size=s eval_env_size=s
-# python3 experiments/ppo.py train_levels=m env_size=m  eval_env_size=m
-# python3 experiments/ppo.py train_levels=l env_size=l  eval_env_size=l
+python3 experiments/ppo.py train_levels=s env_size=s eval=eval_auto
+# python3 experiments/ppo.py train_levels=m env_size=m eval=eval_auto
+# python3 experiments/ppo.py train_levels=l env_size=l eval=eval_auto
 ```
 
 Or, on a custom set:
 ```commandline
-python3 experiments/ppo.py train_levels=l eval_env_size=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
+python3 experiments/ppo.py eval=eval_auto train_levels=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
 
 # ❌ Errata

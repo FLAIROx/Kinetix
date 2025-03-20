@@ -1,53 +1,24 @@
 import os
-import re
+from posixpath import isabs
 from functools import partial
 from typing import Tuple
+import typing
 
 import chex
 import jax
 import jax.numpy as jnp
 from flax.training.train_state import TrainState
-from jaxued.environments.underspecified_env import EnvParams, EnvState, Observation, UnderspecifiedEnv
 
-from kinetix.environment.utils import permute_state
+from gymnax import EnvParams, EnvState
+from gymnax.environments.environment import Environment
 from kinetix.models.actor_critic import ScannedRNN
-from kinetix.util.saving import expand_env_state, get_env_state_from_json, stack_list_of_pytrees
 
-BASE_DIR = "worlds"
-
-DEFAULT_EVAL_LEVELS = [
-    "easy.cartpole",
-    "easy.flappy_bird",
-    "easy.unicycle",
-    "easy.car_left",
-    "easy.car_right",
-    "easy.pinball",
-    "easy.swing_up",
-    "easy.thruster",
-]
-
-
-def get_eval_levels(eval_levels, static_env_params):
-    should_permute = [".permute" in l for l in eval_levels]
-    eval_levels = [re.sub(r"\.permute\d+", "", l) for l in eval_levels]
-    ls = [
-        get_env_state_from_json(os.path.join(BASE_DIR, l + ("" if l.endswith(".json") else ".json")))
-        for l in eval_levels
-    ]
-    ls = [expand_env_state(l, static_env_params) for l in ls]
-    new_ls = []
-    rng = jax.random.PRNGKey(0)
-    for sp, l in zip(should_permute, ls):
-        rng, _rng = jax.random.split(rng)
-        if sp:
-            l = permute_state(_rng, l, static_env_params)
-        new_ls.append(l)
-    return stack_list_of_pytrees(new_ls)
+Observation = typing.Any
 
 
 def evaluate_rnn(  # from jaxued
     rng: chex.PRNGKey,
-    env: UnderspecifiedEnv,
+    env: Environment,
     env_params: EnvParams,
     train_state: TrainState,
     init_hstate: chex.ArrayTree,
@@ -61,7 +32,7 @@ def evaluate_rnn(  # from jaxued
 
     Args:
         rng (chex.PRNGKey):
-        env (UnderspecifiedEnv):
+        env (Environment):
         env_params (EnvParams):
         train_state (TrainState):
         init_hstate (chex.ArrayTree): Shape (num_levels, )
@@ -122,7 +93,7 @@ def evaluate_rnn(  # from jaxued
 
 def general_eval(
     rng: chex.PRNGKey,
-    eval_env: UnderspecifiedEnv,
+    eval_env: Environment,
     env_params: EnvParams,
     train_state: TrainState,
     levels: EnvState,
@@ -208,7 +179,7 @@ def compute_gae(
 
 def sample_trajectories_rnn(
     rng: chex.PRNGKey,
-    env: UnderspecifiedEnv,
+    env: Environment,
     env_params: EnvParams,
     train_state: TrainState,
     init_hstate: chex.ArrayTree,
@@ -226,7 +197,7 @@ def sample_trajectories_rnn(
     Args:
 
         rng (chex.PRNGKey): Singleton
-        env (UnderspecifiedEnv):
+        env (Environment):
         env_params (EnvParams):
         train_state (TrainState): Singleton
         init_hstate (chex.ArrayTree): This is the init RNN hidden state, has to have shape (NUM_ENVS, ...)
@@ -373,7 +344,7 @@ def update_actor_critic_rnn(
 # Cannot jit outside otherwise jax errors with trying to hash a tracer.
 # @partial(jax.jit, static_argnums=(0, 2, 8, 9))
 def sample_trajectories_and_learn(
-    env: UnderspecifiedEnv,
+    env: Environment,
     env_params: EnvParams,
     config: dict,
     rng: chex.PRNGKey,
@@ -407,7 +378,7 @@ def sample_trajectories_and_learn(
     What is returns is a new carry (rng, train_state, init_obs, init_env_state), and concatenated rollouts. The shape of the rollouts are config['num_steps'] * config['outer_rollout_steps']. In other words, the trajectories returned by this function are the same as if we ran rollouts for config['num_steps'] * config['outer_rollout_steps'] steps, but the agent does perform PPO updates in between.
 
     Args:
-        env (UnderspecifiedEnv):
+        env (Environment):
         env_params (EnvParams):
         config (dict):
         rng (chex.PRNGKey):
@@ -479,7 +450,7 @@ def sample_trajectories_and_learn(
 
 
 def no_op_rollout(
-    env: UnderspecifiedEnv,
+    env: Environment,
     env_params: EnvParams,
     rng: chex.PRNGKey,
     init_obs: Observation,
@@ -530,7 +501,7 @@ def no_op_rollout(
 
 
 def no_op_and_random_rollout(
-    env: UnderspecifiedEnv,
+    env: Environment,
     env_params: EnvParams,
     rng: chex.PRNGKey,
     init_obs: Observation,

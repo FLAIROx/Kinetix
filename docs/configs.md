@@ -25,7 +25,6 @@ defaults:
     - ppo-rnn
   - misc: misc
   - eval: s
-  - eval_env_size: s
   - train_levels: random
   - model:
     - model-base
@@ -113,9 +112,9 @@ There are a plethora of miscellaneous options that are grouped under the `misc` 
 ### Eval
 This option (see `configs/eval`) controls how evaluation works, and what levels are used.
 #### Preset Options
-- `s`: Eval on the `s` hand-designed levels located in `worlds/s`
-- `m`: Eval on the `m` hand-designed levels located in `worlds/m`
-- `l`: Eval on the `l` hand-designed levels located in `worlds/l`
+- `s`: Eval on the `s` hand-designed levels located in `kinetix/levels/s`
+- `m`: Eval on the `m` hand-designed levels located in `kinetix/levels/m`
+- `l`: Eval on the `l` hand-designed levels located in `kinetix/levels/l`
 - `eval_all`: Eval on all of the hand-designed eval levels
 - `eval_auto`: If `train_levels` is not random, evaluate on the training levels.
 - `mujoco`: Eval on the recreations of the mujoco tasks.
@@ -143,7 +142,6 @@ Which levels to train on.
 - `random`: Train on random levels
 #### Individual Subkeys
 - `train_level_mode`: "random" or "list"
-- `train_level_distribution`: if train_level_mode=random, this controls which distribution to use. By default `distribution_v3`
 - `train_levels_list`: This is a list of levels to train on.
 ### Model
 This controls the model architecture and options associated with that.

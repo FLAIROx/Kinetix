@@ -26,8 +26,7 @@ from kinetix.environment.ued.mutators import (
 )
 from kinetix.environment.ued.ued_state import UEDParams
 from kinetix.environment.utils import create_empty_env
-from kinetix.util.learning import get_eval_levels
-from kinetix.util.saving import load_world_state_pickle
+from kinetix.util.saving import load_evaluation_levels
 
 
 def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
@@ -141,12 +140,12 @@ def make_vmapped_filtered_level_sampler(
 
 def make_reset_fn_list_of_levels(levels, static_env_params):
     assert len(levels) > 0, "Need to provide at least one level to train on"
-    eval_levels = get_eval_levels(levels, static_env_params)
+    levels_to_reset_to, _ = load_evaluation_levels(levels, static_env_params_override=static_env_params)
 
     def reset(rng):
         rng, _rng = jax.random.split(rng)
         level_idx = jax.random.randint(_rng, (), 0, len(levels))
-        sampled_level = jax.tree.map(lambda x: x[level_idx], eval_levels)
+        sampled_level = jax.tree.map(lambda x: x[level_idx], levels_to_reset_to)
 
         return sampled_level
 
