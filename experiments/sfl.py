@@ -860,7 +860,7 @@ def main(config):
 
         test_metrics["eval/mean_eval_return_sampled"] = eval_dr_returns
         test_metrics["eval/mean_eval_eplen_sampled"] = eval_dr_eplen
-        test_metrics["eval/mean_eval_solve_sampled"] = eval_dr_solves
+        test_metrics["eval/mean_eval_solve_sampled"] = eval_dr_solves.mean(axis=0).mean()
 
         # Collect Metrics
         eval_returns = cum_rewards.mean(axis=0)  # (num_eval_levels,)
