@@ -29,7 +29,7 @@ We have three observation spaces, discrete, continuous and multi-discrete (which
 ### Observation Spaces
 We provide three primary observation spaces, Symbolic-Flat (called just symbolic), Symbolic-Entity (called entity, which is also the default) and Pixels.
 - **Symbolic-Flat** returns a large vector, which is the flattened representation of all shapes and their properties.
-- **Symbolic-Entity** also returns a vector representation of all entities, but does not flatten it, instead returning it in a form that can be used with permutation-invariant network architectures, such as transformers. By default this uses a permutation invariant MLP architecture, but you can use the transformer-based model we used in our paper by setting `model.permutation_invariant_mlp=False` in the command line config.
+- **Symbolic-Entity** also returns a vector representation of all entities, but does not flatten it, instead returning it in a form that can be used with permutation-invariant network architectures, such as transformers. By default this uses the transformer-based model we used in our paper; however, a permutation invariant MLP architecture (which is faster) is also possible, and can be used by setting `model.permutation_invariant_mlp=True` in the command line config.
 - **Pixels** returns an image representation of the scene. This is partially observable, as features such as the restitution and density of shapes is not shown.
 
 
