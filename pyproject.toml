@@ -42,7 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "jaxued @ git+https://github.com/DramaCow/jaxued.git@main",
+  "jaxued",
   "black",
   "pre-commit",
 ]
