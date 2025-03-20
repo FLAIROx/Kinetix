@@ -5,6 +5,8 @@
 <p align="center">
         <a href= "https://pypi.org/project/jax2d/">
         <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue" /></a>
+        <a href= "https://pypi.org/project/kinetix-env/">
+        <img src="https://img.shields.io/badge/pypi-1.0.0-green" /></a>
        <a href= "https://github.com/FLAIROx/Kinetix/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-yellow" /></a>
        <a href= "https://github.com/psf/black">
@@ -132,6 +134,8 @@ pre-commit install
 
 > [!TIP]
 > Setting `export JAX_COMPILATION_CACHE_DIR="$HOME/.jax_cache"` in your `~/.bashrc` helps improve usability by caching the jax compiles.
+
+Kinetix is also available on [PyPi](https://pypi.org/project/kinetix-env/), and can be installed using `pip install kinetix-env`
 
 # 🎯 Editor
 We recommend using the [KinetixJS editor](https://kinetix-env.github.io/gallery.html?editor=true), but also provide a native (less polished) Kinetix editor.
