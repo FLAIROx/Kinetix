@@ -195,7 +195,7 @@ def make_render_pixels(
             rectangle_vertices_pixel_space,
             rectangle_colours,
             rectangle_edge_colours,
-            state.polygon.active,
+            state.polygon.active.at[: static_params.num_static_fixated_polys].set(False),
         )
 
         pixels = quad_renderer(pixels, rectangle_patch_positions, rectangle_uniforms)
