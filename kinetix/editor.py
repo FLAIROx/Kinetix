@@ -215,7 +215,7 @@ def new_env(static_env_params):
     if EMPTY_ENV:
         env_state = create_empty_env(static_env_params)
     else:
-        env_state = get_env_state_from_json("kinetix/levels/l/h0_angrybirds.json")
+        env_state = get_env_state_from_json("l/h0_angrybirds.json")
     return env_state
 
 
