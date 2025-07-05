@@ -863,7 +863,7 @@ def mutate_add_thruster(
         )
 
         state = state.replace(
-            thruster=jax.tree_map(lambda y, x: y.at[thruster_idx].set(x), state.thruster, thruster),
+            thruster=jax.tree.map(lambda y, x: y.at[thruster_idx].set(x), state.thruster, thruster),
             thruster_bindings=state.thruster_bindings.at[thruster_idx].set(thruster_colour),
         )
 

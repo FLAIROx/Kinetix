@@ -292,9 +292,9 @@ def make_train(config, env_params, static_env_params):
                 permutation = jax.random.permutation(_rng, config["num_train_envs"])
                 batch = (init_hstate, traj_batch, advantages, targets)
 
-                shuffled_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=1), batch)
+                shuffled_batch = jax.tree.map(lambda x: jnp.take(x, permutation, axis=1), batch)
 
-                minibatches = jax.tree_util.tree_map(
+                minibatches = jax.tree.map(
                     lambda x: jnp.swapaxes(
                         jnp.reshape(
                             x,

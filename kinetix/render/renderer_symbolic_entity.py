@@ -36,7 +36,7 @@ def make_render_entities(env_params, static_params, ignore_attention_mask=False)
     circle_circle_pairs = circle_circle_pairs + static_params.num_polygons
 
     def render_entities(state: EnvState):
-        state = jax.tree_util.tree_map(lambda x: jnp.nan_to_num(x), state)
+        state = jax.tree.map(lambda x: jnp.nan_to_num(x), state)
 
         joint_features, joint_indexes, joint_mask = make_joint_features(state, env_params, static_params)
         thruster_features, thruster_indexes, thruster_mask = make_thruster_features(state, env_params, static_params)

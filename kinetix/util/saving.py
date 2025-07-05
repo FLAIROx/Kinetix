@@ -95,7 +95,7 @@ def expand_env_state(env_state: EnvState, static_env_params: StaticEnvParams, ig
     num_thrusters = len(env_state.thruster.object_index)
 
     def _add_dummy(num_to_add, obj):
-        return jax.tree_map(
+        return jax.tree.map(
             lambda current: jnp.concatenate(
                 [current, jnp.zeros((num_to_add, *current.shape[1:]), dtype=current.dtype)], axis=0
             ),
@@ -195,9 +195,9 @@ def load_world_state_pickle(filename, env_params=None, static_env_params=None):
 
 
 def stack_list_of_pytrees(list_of_pytrees):
-    v = jax.tree_map(lambda x: jnp.expand_dims(x, 0), list_of_pytrees[0])
+    v = jax.tree.map(lambda x: jnp.expand_dims(x, 0), list_of_pytrees[0])
     for l in list_of_pytrees[1:]:
-        v = jax.tree_map(lambda x, y: jnp.concatenate([x, jnp.expand_dims(y, 0)], axis=0), v, l)
+        v = jax.tree.map(lambda x, y: jnp.concatenate([x, jnp.expand_dims(y, 0)], axis=0), v, l)
     return v
 
 

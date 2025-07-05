@@ -428,7 +428,7 @@ def main(config=None):
         )
         metrics = (
             {
-                "losses": jax.tree_util.tree_map(lambda x: x.mean(), losses),
+                "losses": jax.tree.map(lambda x: x.mean(), losses),
                 "returned_episode_lengths": (info["returned_episode_lengths"] * dones).sum()
                 / jnp.maximum(1, dones.sum()),
                 "max_episode_length": info["returned_episode_lengths"].max(),
@@ -555,7 +555,7 @@ def main(config=None):
 
         pholder_level = jax.tree.map(lambda x: x[0], sample_random_levels(jax.random.PRNGKey(0), 1))
         sampler = level_sampler.initialize(pholder_level, {"max_return": -jnp.inf})
-        pholder_level_batch = jax.tree_util.tree_map(
+        pholder_level_batch = jax.tree.map(
             lambda x: jnp.array([x]).repeat(config["num_train_envs"], axis=0), pholder_level
         )
         pholder_rollout_batch = (
@@ -928,11 +928,11 @@ def main(config=None):
             metrics = {"log_videos": True}
 
             # just grab the first run
-            states, episode_lengths = jax.tree_util.tree_map(
+            states, episode_lengths = jax.tree.map(
                 lambda x: x[0], (states, episode_lengths)
             )  # (num_steps, num_eval_levels, ...), (num_eval_levels,)
             # And one attempt
-            states = jax.tree_util.tree_map(lambda x: x[:, :], states)
+            states = jax.tree.map(lambda x: x[:, :], states)
             episode_lengths = episode_lengths[:]
             images = jax.vmap(jax.vmap(render_fn_eval))(states.env_state)  # (num_steps, num_eval_levels, ...)
             frames = images.transpose(

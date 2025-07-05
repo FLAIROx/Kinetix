@@ -193,7 +193,7 @@ def save_data_to_local_file(data_to_save, config):
             return int(x)
         return x
 
-    clean_data = jax.tree_map(lambda x: _clean(x), clean_data)
+    clean_data = jax.tree.map(lambda x: _clean(x), clean_data)
     print("Saving this data:", clean_data)
     with open(f"{config['log_save_path']}/data.jsonl", "a+") as f:
         f.write(json.dumps(clean_data) + "\n")

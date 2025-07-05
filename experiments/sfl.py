@@ -564,9 +564,9 @@ def main(config):
             )
             permutation = jax.random.permutation(_rng, config["num_train_envs"])
 
-            shuffled_batch = jax.tree_util.tree_map(lambda x: jnp.take(x, permutation, axis=1), batch)
+            shuffled_batch = jax.tree.map(lambda x: jnp.take(x, permutation, axis=1), batch)
 
-            minibatches = jax.tree_util.tree_map(
+            minibatches = jax.tree.map(
                 lambda x: jnp.swapaxes(
                     jnp.reshape(
                         x,
@@ -828,11 +828,11 @@ def main(config):
         )
         eval_solves = eval_solves.mean(axis=0)
         # just grab the first run
-        states, episode_lengths = jax.tree_util.tree_map(
+        states, episode_lengths = jax.tree.map(
             lambda x: x[0], (states, episode_lengths)
         )  # (num_steps, num_eval_levels, ...), (num_eval_levels,)
         # And one attempt
-        states = jax.tree_util.tree_map(lambda x: x[:, :], states)
+        states = jax.tree.map(lambda x: x[:, :], states)
         episode_lengths = episode_lengths[:]
         images = jax.vmap(jax.vmap(render_fn_eval))(states.env_state)  # (num_steps, num_eval_levels, ...)
         frames = images.transpose(
@@ -892,11 +892,11 @@ def main(config):
         )(jax.random.split(rng_eval, config["eval_num_attempts"]), runner_state_instances[0][0], top_instances)
 
         # just grab the first run
-        states, episode_lengths = jax.tree_util.tree_map(
+        states, episode_lengths = jax.tree.map(
             lambda x: x[0], (tl_states, tl_episode_lengths)
         )  # (num_steps, num_eval_levels, ...), (num_eval_levels,)
         # And one attempt
-        states = jax.tree_util.tree_map(lambda x: x[:, :], states)
+        states = jax.tree.map(lambda x: x[:, :], states)
         episode_lengths = episode_lengths[:]
         images = jax.vmap(jax.vmap(render_fn))(states.env_state)  # (num_steps, num_eval_levels, ...)
         frames = images.transpose(

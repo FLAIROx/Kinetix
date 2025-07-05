@@ -316,7 +316,7 @@ def update_actor_critic_rnn(
             if update_grad:
                 train_state = train_state.apply_gradients(grads=grads)
             grad_norm = jnp.linalg.norm(
-                jnp.concatenate(jax.tree_util.tree_map(lambda x: x.flatten(), jax.tree_util.tree_flatten(grads)[0]))
+                jnp.concatenate(jax.tree.map(lambda x: x.flatten(), jax.tree_util.tree_flatten(grads)[0]))
             )
             return train_state, (loss, grad_norm)
 
@@ -443,7 +443,7 @@ def sample_trajectories_and_learn(
         carry = (rng, train_state, init_hstate, init_obs, init_env_state)
         new_carry, all_rollouts = jax.lax.scan(single_step, carry, None, length=config["outer_rollout_steps"])
 
-        all_rollouts = jax.tree_util.tree_map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
+        all_rollouts = jax.tree.map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
         return new_carry, all_rollouts
 
     return inner(rng, train_state, init_hstate, init_obs, init_env_state)
