@@ -34,6 +34,7 @@ class KinetixEnv(Environment):
         static_env_params: StaticEnvParams,
         reset_function: Callable[[chex.PRNGKey], EnvState] = None,
         physics_engine: PhysicsEngine = None,
+        auto_reset: bool = True,
     ):
         super().__init__()
         self.static_env_params = static_env_params
@@ -42,6 +43,7 @@ class KinetixEnv(Environment):
         self.physics_engine = physics_engine or PhysicsEngine(self.static_env_params)
 
         self.reset_function = reset_function
+        self.auto_reset = auto_reset
 
     # Overridden functions from Gymnax
     def step_env(self, rng, state, action: jnp.ndarray, env_params):
@@ -74,13 +76,16 @@ class KinetixEnv(Environment):
         if env_params is None:
             env_params = self.default_params
         key, key_reset = jax.random.split(key)
+
         obs_st, state_st, reward, done, info = self.step_env(key, state, action, env_params)
-
-        obs_re, state_re = self.reset_env(key_reset, env_params, override_reset_state=override_reset_state)
-
-        # Auto-reset environment based on termination
-        state = jax.tree_map(lambda x, y: jax.lax.select(done, x, y), state_re, state_st)
-        obs = jax.tree.map(lambda x, y: jax.lax.select(done, x, y), obs_re, obs_st)
+        if self.auto_reset:
+            obs_re, state_re = self.reset_env(key_reset, env_params, override_reset_state=override_reset_state)
+            # Auto-reset environment based on termination
+            state = jax.tree.map(lambda x, y: jax.lax.select(done, x, y), state_re, state_st)
+            obs = jax.tree.map(lambda x, y: jax.lax.select(done, x, y), obs_re, obs_st)
+        else:
+            obs = obs_st
+            state = state_st
 
         return obs, state, reward, done, info
 
@@ -259,6 +264,7 @@ def make_kinetix_env(
     reset_fn: Optional[Callable[[chex.PRNGKey], EnvState]],
     env_params: Optional[EnvParams] = None,
     static_env_params: Optional[StaticEnvParams] = None,
+    auto_reset: bool = True,
 ) -> KinetixEnv:
     """
 
@@ -268,6 +274,7 @@ def make_kinetix_env(
         reset_func (Callable[[chex.PRNGKey], EnvState], optional): If this is given, this is the function that gets called on reset to provide the starting state for the next episode. Defaults to None, in which case the environment has no auto reset behaviour
         env_params (EnvParams): EnvParams
         static_env_params (StaticEnvParams): StaticEnvParams
+        auto_reset (bool): If True, the environment will automatically reset when the episode is done, in the standard gymnax way. Defaults to True.
 
     Returns:
         KinetixEnv: The kinetix environment
@@ -307,4 +314,5 @@ def make_kinetix_env(
         observation_type=obs_type,
         static_env_params=static_env_params,
         reset_function=reset_fn,
+        auto_reset=auto_reset,
     )
