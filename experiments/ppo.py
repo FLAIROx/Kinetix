@@ -13,8 +13,9 @@ from flax.training.train_state import TrainState
 from omegaconf import OmegaConf
 
 import wandb
-from kinetix.environment import LogWrapper, PixelObservations
+from kinetix.environment import LogWrapper
 from kinetix.environment.env import make_kinetix_env
+from kinetix.environment import PixelObservations
 from kinetix.models import ScannedRNN, make_network_from_config
 from kinetix.render.renderer_pixels import make_render_pixels
 from kinetix.util import (

@@ -10,8 +10,7 @@ from jax2d.engine import PhysicsEngine
 from jax2d.sim_state import CollisionManifold
 
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
-from kinetix.environment.ued.ued import make_reset_fn_from_config
-from kinetix.environment.utils import (
+from kinetix.environment.spaces import (
     ActionType,
     ContinuousActions,
     DiscreteActions,
@@ -19,10 +18,10 @@ from kinetix.environment.utils import (
     KinetixAction,
     KinetixObservation,
     MultiDiscreteActions,
-    ObservationType,
-    SymbolicPaddedObservations,
     PixelObservations,
     SymbolicObservations,
+    SymbolicPaddedObservations,
+    ObservationType,
 )
 
 

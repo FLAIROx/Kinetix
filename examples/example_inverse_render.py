@@ -8,6 +8,8 @@ from kinetix.environment.env_state import StaticEnvParams
 from kinetix.environment import ActionType, ObservationType
 from kinetix.environment.ued.ued import make_reset_fn_sample_kinetix_level
 from kinetix.render import make_render_pixels
+from kinetix.render.renderer_pixels import make_render_pixels_rl
+from kinetix.render.renderer_symbolic_flat import make_inverse_render_symbolic
 
 
 # This applies normal gymnax auto-reset behaviour, resetting to a different randomly-generated level each time.
@@ -17,7 +19,7 @@ def main():
     # Create the environment
     env = make_kinetix_env(
         action_type=ActionType.CONTINUOUS,
-        observation_type=ObservationType.PIXELS,
+        observation_type=ObservationType.SYMBOLIC_FLAT,
         reset_fn=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
         env_params=env_params,
         static_env_params=static_env_params,
@@ -30,12 +32,22 @@ def main():
     action = env.action_space(env_params).sample(_rng_action)
     obs, env_state, reward, done, info = env.step(_rng_step, env_state, action, env_params)
 
+    inverse_render_fn = make_inverse_render_symbolic(env_state, env_params, static_env_params)
+
     # Render environment
-    renderer = make_render_pixels(env_params, env.static_env_params)
+    renderer = make_render_pixels(env_params, env.static_env_params.replace(downscale=1))
 
     pixels = renderer(env_state)
 
-    plt.imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
+    env_state_from_symbolic = inverse_render_fn(obs)
+    pixels_from_symbolic = renderer(env_state_from_symbolic)
+
+    fig, axs = plt.subplots(1, 2)
+    axs[0].set_title("Original")
+    axs[0].imshow(pixels.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
+    axs[1].set_title("From symbolic")
+    axs[1].imshow(pixels_from_symbolic.astype(jnp.uint8).transpose(1, 0, 2)[::-1])
+    plt.tight_layout()
     plt.show()
 
 

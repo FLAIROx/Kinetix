@@ -43,6 +43,7 @@ from kinetix.environment import (
     make_kinetix_env,
     permute_state,
 )
+from kinetix.environment import ActionType, ObservationType
 from kinetix.environment.ued.mutators import (
     make_mutate_change_shape_rotation,
     make_mutate_change_shape_size,
@@ -58,7 +59,6 @@ from kinetix.environment.ued.mutators import (
 )
 from kinetix.environment.ued.ued import ALL_MUTATION_FNS, make_mutate_env
 from kinetix.environment.ued.util import rectangle_vertices
-from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.models import ScannedRNN, make_network_from_config
 from kinetix.render import make_render_entities, make_render_pixels
 from kinetix.render.textures import (
@@ -1642,7 +1642,7 @@ class Editor:
             (self.static_env_params.max_shape_size / 2) / jnp.sqrt(2),
         )
         half_dim = jnp.abs(diff)
-        half_dim = jnp.clip(half_dim, a_min=5.0 / self.env_params.pixels_per_unit)
+        half_dim = jnp.clip(half_dim, min=5.0 / self.env_params.pixels_per_unit)
         vertices = rectangle_vertices(half_dim)
 
         def _add_rect_to_state(state, highlight):

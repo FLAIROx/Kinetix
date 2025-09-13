@@ -14,8 +14,9 @@ from omegaconf import OmegaConf
 
 import wandb
 from kinetix.environment.env_state import EnvParams, StaticEnvParams
+from kinetix.environment.spaces import ActionType
+from kinetix.environment.spaces import ObservationType
 from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.environment.utils import ActionType, ObservationType
 from kinetix.util.saving import get_correct_path_of_json_level, load_from_json_file
 
 

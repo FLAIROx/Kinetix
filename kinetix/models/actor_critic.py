@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from flax.linen.initializers import constant, orthogonal
 
-from kinetix.environment.utils import ActionType
+from kinetix.environment.spaces import ActionType
 from kinetix.models.action_spaces import HybridActionDistribution, MultiDiscreteActionDistribution
 
 

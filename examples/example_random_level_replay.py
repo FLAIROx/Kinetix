@@ -4,7 +4,7 @@ import jax.random
 from matplotlib import pyplot as plt
 
 from kinetix.environment import EnvParams, UEDParams, make_kinetix_env, sample_kinetix_level, StaticEnvParams
-from kinetix.environment.utils import ActionType, ObservationType
+from kinetix.environment import ActionType, ObservationType
 from kinetix.render import make_render_pixels
 
 

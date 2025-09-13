@@ -1,4 +1,4 @@
-from kinetix.environment.utils import ActionType, ObservationType
+from kinetix.environment.spaces import ActionType, ObservationType
 from kinetix.models.actor_critic import (
     ActorCriticPermutationInvariantSymbolicRNN,
     ActorCriticPixelsRNN,
