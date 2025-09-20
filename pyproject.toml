@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinetix-env"
-version = "1.0.7"
+version = "1.0.8"
 authors = [
   { name="Michael Matthews", email="michael.matthews@eng.ox.ac.uk" },
   { name="Michael Beukman", email="michael.beukman@eng.ox.ac.uk" },

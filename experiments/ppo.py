@@ -466,6 +466,11 @@ def main(config):
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
 
+    if config["num_minibatches"] > config["num_train_envs"]:
+        raise ValueError(
+            f"num_minibatches ({config['num_minibatches']}) must be less than or equal to num_train_envs ({config['num_train_envs']})"
+        )
+
     if config["use_wandb"]:
         run = init_wandb(config, "PPO")
 
