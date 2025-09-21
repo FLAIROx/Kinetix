@@ -1,15 +1,20 @@
+from typing import Callable
 import jax
 import jax.numpy as jnp
 from flax import struct
 from jax2d.engine import get_pairwise_interaction_indices
 
-from kinetix.environment.env_state import EnvState
+from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
+from kinetix.environment.utils import create_empty_env
+from kinetix.render import inverse_renderer_common
 from kinetix.render.renderer_symbolic_common import (
     make_circle_features,
     make_joint_features,
     make_polygon_features,
     make_thruster_features,
 )
+from kinetix.render.renderer_symbolic_flat import _get_symbolic_features
+from jax2d.engine import calculate_collision_matrix
 
 
 @struct.dataclass
@@ -119,3 +124,74 @@ def make_render_entities(env_params, static_params, ignore_attention_mask=False)
         )
 
     return render_entities
+
+
+def make_inverse_render_entity(
+    env_state: EnvState, env_params: EnvParams, static_env_params: StaticEnvParams
+) -> Callable[[jnp.ndarray], EnvState]:
+    """This creates an inverse renderer, which takes in an observation and returns an EnvState.
+
+    Args:
+        env_state (EnvState): This is a dummy env state, and is used to get the shapes of the various arrays.
+
+    Returns:
+        Callable[[jnp.ndarray], EnvState]: Maps symbolic entity observation to Env
+    """
+
+    (
+        nshapes,
+        *_,
+    ) = _get_symbolic_features(env_state, env_params, static_env_params)
+
+    def symbolic_entity_obs_to_env_state(obs: EntityObservation) -> EnvState:
+
+        env_state = create_empty_env(static_env_params)
+        polygons, polygon_shape_roles, polygon_densities = inverse_renderer_common.features_to_rigidbody(
+            env_params, static_env_params, obs.polygons, static_env_params.num_polygons, is_circle=False
+        )
+
+        polygons = polygons.replace(
+            active=obs.polygon_mask,
+            collision_mode=polygons.collision_mode.at[: static_env_params.num_static_fixated_polys].set(2),
+        )
+
+        circles, circle_shape_roles, circle_densities = inverse_renderer_common.features_to_rigidbody(
+            env_params, static_env_params, obs.circles, static_env_params.num_circles, is_circle=True
+        )
+        circles = circles.replace(active=obs.circle_mask)
+
+        env_state = env_state.replace(
+            polygon=polygons,
+            circle=circles,
+            polygon_shape_roles=polygon_shape_roles,
+            circle_shape_roles=circle_shape_roles,
+            polygon_densities=polygon_densities,
+            circle_densities=circle_densities,
+        )
+
+        joints, motor_bindings = inverse_renderer_common.features_to_joint(
+            static_env_params,
+            env_state,
+            obs.joints[: static_env_params.num_joints],
+            nshapes,
+            joint_idxs_override=obs.joint_indexes[: static_env_params.num_joints],
+        )
+
+        joints = joints.replace(
+            active=obs.joint_mask[: static_env_params.num_joints],
+        )
+
+        thrusters, thruster_bindings = inverse_renderer_common.features_to_thruster(
+            static_env_params, env_state, obs.thrusters, nshapes, thruster_idxs_override=obs.thruster_indexes
+        )
+        thrusters = thrusters.replace(active=obs.thruster_mask, object_index=obs.thruster_indexes)
+
+        env_state = env_state.replace(
+            joint=joints, thruster=thrusters, motor_bindings=motor_bindings, thruster_bindings=thruster_bindings
+        )
+
+        return env_state.replace(
+            collision_matrix=calculate_collision_matrix(static_env_params, env_state.joint),
+        )
+
+    return symbolic_entity_obs_to_env_state

@@ -16,6 +16,7 @@ from kinetix.environment import ActionType, ObservationType
 from kinetix.environment.ued.ued import make_reset_fn_sample_kinetix_level
 from kinetix.render import make_render_pixels
 from kinetix.render.renderer_pixels import make_render_pixels_rl
+from kinetix.render.renderer_symbolic_entity import make_inverse_render_entity, make_render_entities
 from kinetix.render.renderer_symbolic_flat import make_inverse_render_symbolic, make_render_symbolic
 
 
@@ -119,7 +120,7 @@ class TestInverseRender(unittest.TestCase):
     def test_basic_assertion(self):
         self.assertEqual(2, 2)
 
-    def test_inverse_render(self):
+    def test_inverse_render_symbolic_flat(self):
         seed = 10
         num_samples = 128
         env_params = EnvParams()
@@ -141,6 +142,38 @@ class TestInverseRender(unittest.TestCase):
         render_fn_pixels = jax.vmap(make_render_pixels_rl(env_params, static_env_params))
         inverse_render_fn = jax.vmap(
             make_inverse_render_symbolic(jax.tree.map(lambda x: x[0], env_state), env_params, static_env_params)
+        )
+
+        rendered = render_fn(env_state)
+        inverse_rendered = inverse_render_fn(rendered)
+
+        compare_env_states(env_state, inverse_rendered)
+
+        rendered_pixels = render_fn_pixels(inverse_rendered)
+        self.assertTrue(jnp.allclose(rendered_pixels.image, obs.image))
+
+    def test_inverse_render_symbolic_entity(self):
+        seed = 10
+        num_samples = 128
+        env_params = EnvParams()
+        static_env_params = StaticEnvParams()
+
+        # Create the environment
+        env = make_kinetix_env(
+            action_type=ActionType.CONTINUOUS,
+            observation_type=ObservationType.PIXELS,
+            reset_fn=make_reset_fn_sample_kinetix_level(env_params, static_env_params),
+            env_params=env_params,
+            static_env_params=static_env_params,
+        )
+        rng, _rng_reset, _rng_action, _rng_step = jax.random.split(jax.random.PRNGKey(seed), 4)
+
+        obs, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng_reset, num_samples), env_params)
+
+        render_fn = jax.vmap(make_render_entities(env_params, static_env_params))
+        render_fn_pixels = jax.vmap(make_render_pixels_rl(env_params, static_env_params))
+        inverse_render_fn = jax.vmap(
+            make_inverse_render_entity(jax.tree.map(lambda x: x[0], env_state), env_params, static_env_params)
         )
 
         rendered = render_fn(env_state)
