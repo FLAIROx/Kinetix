@@ -80,7 +80,7 @@ def get_eval_level_groups(eval_levels: List[str]) -> List[Tuple[str, str]]:
     return indices2
 
 
-def normalise_config(config, name, editor_config=False):
+def normalise_config(config, name, editor_config=False, save_config: bool = True):
     old_config = copy.deepcopy(config)
     keys = ["env", "learning", "model", "misc", "eval", "ued", "env_size", "train_levels"]
     for k in keys:
@@ -109,9 +109,10 @@ def normalise_config(config, name, editor_config=False):
         config["random_hash"] = np.random.randint(2**31)
 
         config["log_save_path"] = f"logs/{config['hash']}/{config['seed']}-{get_date()}"
-        os.makedirs(config["log_save_path"], exist_ok=True)
-        with open(f"{config['log_save_path']}/config.yaml", "w") as f:
-            f.write(OmegaConf.to_yaml(old_config))
+        if save_config:
+            os.makedirs(config["log_save_path"], exist_ok=True)
+            with open(f"{config['log_save_path']}/config.yaml", "w") as f:
+                f.write(OmegaConf.to_yaml(old_config))
         if config["group"] == "auto":
             config["group"] = f"{name}-" + config["group_auto_prefix"] + config["env_name"].replace("Kinetix-", "")
             config["group"] += "-" + str(config["env_size_name"])
