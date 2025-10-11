@@ -101,6 +101,7 @@ def general_eval(
     num_levels: int,
     keep_states=True,
     return_trajectories=False,
+    initialize_carry_fn=ScannedRNN.initialize_carry,
 ):
     """
     This evaluates the current policy on the set of evaluation levels
@@ -110,7 +111,7 @@ def general_eval(
     init_obs, init_env_state = jax.vmap(eval_env.reset, (0, None, 0))(
         jax.random.split(rng_reset, num_levels), env_params, levels
     )
-    init_hstate = ScannedRNN.initialize_carry(num_levels)
+    init_hstate = initialize_carry_fn(num_levels)
     (states, rewards, done_idx, episode_lengths, infos), (dones, reward) = evaluate_rnn(
         rng,
         eval_env,
