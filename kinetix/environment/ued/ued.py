@@ -9,6 +9,7 @@ from jax2d.engine import PhysicsEngine
 
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
 from kinetix.environment.ued.distributions import create_vmapped_filtered_distribution, sample_kinetix_level
+from kinetix.environment.ued.locomotion_distribution import make_reset_fn_custom_distribution
 from kinetix.environment.ued.mutators import (
     make_mutate_change_shape_rotation,
     make_mutate_change_shape_size,
@@ -176,6 +177,10 @@ def make_reset_fn_from_config(
         reset_fn = make_reset_fn_list_of_levels(config["train_levels_list"], static_env_params)
     elif config["train_level_mode"] == "random":
         reset_fn = make_reset_fn_sample_kinetix_level(env_params, static_env_params, ued_params, physics_engine)
+    elif config["train_level_mode"] == "locomotion":
+        reset_fn = make_reset_fn_custom_distribution(
+            config["train_level_mode"], env_params, static_env_params, fn_kwargs=dict(ued_params=ued_params)
+        )
     else:
         raise ValueError("Invalid Reset Function Provided")
 
