@@ -256,6 +256,20 @@ class KinetixEnv(Environment):
     def default_static_params() -> StaticEnvParams:
         return StaticEnvParams()
 
+    def __hash__(self):
+        return hash(
+            (
+                hash(self.static_env_params),
+                self.action_type.__class__.__name__,
+                self.observation_type.__class__.__name__,
+                self.reset_function,
+                self.auto_reset,
+            )
+        )
+
+    def __eq__(self, value):
+        return hash(self) == hash(value)
+
 
 def make_kinetix_env(
     action_type: ActionType,

@@ -179,6 +179,11 @@ python3 experiments/sfl.py model.transformer_depth=8
 
 These experiments use [wandb](https://wandb.ai/home) for logging by default.
 
+
+> [!Note]
+> Experiments tend to run faster when you have JAX's [persistent compilation cache](https://docs.jax.dev/en/latest/persistent_compilation_cache.html) enabled, and you can set it, for instance, as `export JAX_COMPILATION_CACHE_DIR=.jax_cache`
+
+
 ## 🏋️ Training RL Agents
 We provide several different ways to train RL agents, with the three most common options being, (a) [Training an agent on random levels](#training-on-random-levels), (b) [Training an agent on a single, hand-designed level](#training-on-a-single-hand-designed-level) or (c) [Training an agent on a set of hand-designed levels](#training-on-a-set-of-hand-designed-levels).
 

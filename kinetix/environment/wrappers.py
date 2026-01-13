@@ -71,3 +71,9 @@ class LogWrapper(GymnaxWrapper):
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         return obs, state, reward, done, info
+
+    def __hash__(self):
+        return hash(self._env)
+
+    def __eq__(self, value):
+        return hash(self) == hash(value)
