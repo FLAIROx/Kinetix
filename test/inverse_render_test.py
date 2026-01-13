@@ -3,7 +3,6 @@ import unittest
 
 import tree
 
-from build.lib.kinetix.environment import env_state
 from kinetix.environment import EnvState
 import jax
 import jax.numpy as jnp
