@@ -1052,9 +1052,7 @@ def main(config=None):
         metrics["highest_scoring_level"] = render_fn(highest_scoring_level)
         metrics["highest_weighted_level"] = render_fn(highest_weighted_level)
 
-        # log_eval(metrics, train_state_to_log_dict(runner_state[1], level_sampler))
-        jax.debug.callback(log_eval, metrics, train_state_to_log_dict(runner_state[1], level_sampler))
-        return (rng, train_state), {"update_count": metrics["update_count"]}
+        return (rng, train_state), metrics
 
     def log_checkpoint(update_count, train_state):
         if config["save_path"] is not None and config["checkpoint_save_freq"] > 1:
@@ -1068,10 +1066,10 @@ def main(config=None):
             save_model(train_state, steps, config)
 
     def train_eval_and_checkpoint_step(runner_state, _):
-        runner_state, metrics = jax.lax.scan(
-            train_and_eval_step, runner_state, xs=jnp.arange(config["checkpoint_save_freq"] // config["eval_freq"])
-        )
-        jax.debug.callback(log_checkpoint, metrics["update_count"][-1], runner_state[1])
+        for i in range(config["checkpoint_save_freq"] // config["eval_freq"]):
+            runner_state, metrics = train_and_eval_step(runner_state, i)
+            jax.debug.callback(log_eval, metrics, train_state_to_log_dict(runner_state[1], level_sampler))
+        jax.debug.callback(log_checkpoint, metrics["update_count"], runner_state[1])
         return runner_state, metrics
 
     # Set up the train states
@@ -1081,11 +1079,8 @@ def main(config=None):
     train_state = create_train_state(rng_init)
     runner_state = (rng_train, train_state)
 
-    runner_state, metrics = jax.lax.scan(
-        train_eval_and_checkpoint_step,
-        runner_state,
-        xs=jnp.arange((config["num_updates"]) // (config["checkpoint_save_freq"])),
-    )
+    for i in range((config["num_updates"]) // (config["checkpoint_save_freq"])):
+        runner_state, metrics = train_eval_and_checkpoint_step(runner_state, i)
 
     if config["save_policy"]:
         save_model(runner_state[1], config["total_timesteps"], config, is_final=True, save_to_wandb=config["use_wandb"])
