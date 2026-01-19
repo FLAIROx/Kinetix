@@ -2,3 +2,4 @@ action_type: multi_discrete
 observation_type: symbolic_flat
 dense_reward_scale: 0.2
 frame_skip: 2
+dummy_env: False

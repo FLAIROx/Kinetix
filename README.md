@@ -216,6 +216,10 @@ Or, on a custom set:
 python3 experiments/ppo.py eval=eval_auto train_levels=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
 
+# 💨 Compilation Speed
+Since Kinetix is quite complex, it generally takes quite a long time to compile. In particular, running `plr.py` or `sfl.py` may take a long time to get to actually executing code. This can be a burden when you are implementing new features, and just want to debug quickly. To make this easier, we provide two options: `train_levels=dummy env.dummy_env=True` (e.g. using `python experiments/sfl.py train_levels=dummy env.dummy_env=True`). These options replace the actual environment step and reset logic with no-ops, meaning that the compilation process will be much faster. However, no logic will be executed, so this is only to check syntax / shape / jax errors, and not to debug learning issues.
+
+
 # ❌ Errata
 - The left wall was erroneously misplaced 5cm to the left in all levels and all experiments in the paper (each level is a square with side lengths of 5 metres). This error has been fixed in the latest version of Jax2D, but we have pinned Kinetix to the old version for consistency and reproducability with the original paper.
 Further improvements have been made, so if you wish to reproduce the paper's results, please use kinetix version 0.1.0, which is tagged on github.

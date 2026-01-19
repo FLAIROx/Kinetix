@@ -101,7 +101,14 @@ def main(config):
 
     def make_env(static_env_params):
         env = LogWrapper(
-            make_kinetix_env(config["action_type"], config["observation_type"], None, env_params, static_env_params)
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                None,
+                env_params,
+                static_env_params,
+                create_dummy_env=config["dummy_env"],
+            )
         )
         return env
 

@@ -24,6 +24,8 @@ from kinetix.environment.spaces import (
     ObservationType,
 )
 
+from kinetix.environment.utils import create_empty_env
+
 
 class KinetixEnv(Environment):
     def __init__(
@@ -271,6 +273,42 @@ class KinetixEnv(Environment):
         return hash(self) == hash(value)
 
 
+class KinetixDummyEnv(KinetixEnv):
+    def step_env(self, rng, state, action: jnp.ndarray, env_params):
+        return (
+            jax.lax.stop_gradient(self.get_obs(state)),
+            jax.lax.stop_gradient(state),
+            0.0,
+            False,
+            {"GoalR": False, "distance": 0.0},
+        )
+
+    def reset_env(self, rng, env_params, override_reset_state: EnvState):
+        if override_reset_state is not None:
+            env_state = override_reset_state
+        elif self.reset_function is not None:
+            env_state = create_empty_env(self.static_env_params)
+        else:
+            raise NotImplementedError("No reset function provided")
+
+        return self.get_obs(env_state), env_state
+
+    def __hash__(self):
+        return hash(
+            (
+                hash(self.static_env_params),
+                self.action_type.__class__.__name__,
+                self.observation_type.__class__.__name__,
+                self.reset_function,
+                self.auto_reset,
+                "dummy",
+            )
+        )
+
+    def __eq__(self, value):
+        return hash(self) == hash(value)
+
+
 def make_kinetix_env(
     action_type: ActionType,
     observation_type: ObservationType,
@@ -278,6 +316,7 @@ def make_kinetix_env(
     env_params: Optional[EnvParams] = None,
     static_env_params: Optional[StaticEnvParams] = None,
     auto_reset: bool = True,
+    create_dummy_env: bool = False,
 ) -> KinetixEnv:
     """
 
@@ -288,6 +327,7 @@ def make_kinetix_env(
         env_params (EnvParams): EnvParams
         static_env_params (StaticEnvParams): StaticEnvParams
         auto_reset (bool): If True, the environment will automatically reset when the episode is done, in the standard gymnax way. Defaults to True.
+        create_dummy_env (bool): If true, creates a dummy environment that has no-ops for the step and reset, so that it compiles significantly faster.
 
     Returns:
         KinetixEnv: The kinetix environment
@@ -322,7 +362,10 @@ def make_kinetix_env(
         )
     obs_type = obs_type_cls(env_params, static_env_params)
 
-    return KinetixEnv(
+    env_cls = KinetixEnv
+    if create_dummy_env:
+        env_cls = KinetixDummyEnv
+    return env_cls(
         action_type=action_type,
         observation_type=obs_type,
         static_env_params=static_env_params,
