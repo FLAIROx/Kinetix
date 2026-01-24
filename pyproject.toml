@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinetix-env"
-version = "2.0.3"
+version = "2.0.4"
 authors = [
   { name="Michael Matthews", email="michael.matthews@eng.ox.ac.uk" },
   { name="Michael Beukman", email="michael.beukman@eng.ox.ac.uk" },
@@ -18,11 +18,11 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "jax>=0.4.37,<=0.8.2",
+    "jax>=0.4.37,<=0.9.0",
     "distrax",
     "optax",
     "flax>=0.10.4",
-    "numpy==1.26.4",
+    "numpy",
     "argparse",
     "wandb",
     "orbax-checkpoint",
