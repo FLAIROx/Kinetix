@@ -163,7 +163,7 @@ def compute_learnability(config, done, reward, info, num_envs):
             return r, success, collision, timeo, l
 
         done_idxs = jnp.argwhere(dones, size=50, fill_value=max_steps).squeeze()
-        mask_done = jnp.where(done_idxs == max_steps, 0, 1)
+        mask_done = jnp.where(done_idxs == max_steps, False, True)
         ep_return, success, collision, timeo, length = __ep_outcomes(
             jnp.concatenate([jnp.array([-1]), done_idxs[:-1]]), done_idxs
         )
@@ -313,9 +313,9 @@ def main(config=None):
         log_dict.update(_aggregate_per_size(stats["eval_solves"], "eval_aggregate/solve_rate"))
 
         if config["EVAL_ON_SAMPLED"]:
-            log_dict.update({"eval/mean_eval_return_sampled": stats["eval_dr_returns"].mean()})
-            log_dict.update({"eval/mean_eval_solve_rate_sampled": stats["eval_dr_solve_rates"].mean()})
-            log_dict.update({"eval/mean_eval_eplen_sampled": stats["eval_dr_eplen"].mean()})
+            log_dict.update({"eval/mean_eval_return_sampled": stats["eval/mean_eval_return_sampled"].mean()})
+            log_dict.update({"eval/mean_eval_solve_rate_sampled": stats["eval/mean_eval_solve_sampled"].mean()})
+            log_dict.update({"eval/mean_eval_eplen_sampled": stats["eval/mean_eval_eplen_sampled"].mean()})
 
         # level sampler
         log_dict.update(train_state_info["log"])
@@ -455,7 +455,12 @@ def main(config=None):
     def make_env(static_env_params):
         env = LogWrapper(
             make_kinetix_env(
-                config_for_env["action_type"], config_for_env["observation_type"], None, env_params, static_env_params
+                config_for_env["action_type"],
+                config_for_env["observation_type"],
+                None,
+                env_params,
+                static_env_params,
+                create_dummy_env=config["dummy_env"],
             )
         )
         return env
@@ -1052,9 +1057,7 @@ def main(config=None):
         metrics["highest_scoring_level"] = render_fn(highest_scoring_level)
         metrics["highest_weighted_level"] = render_fn(highest_weighted_level)
 
-        # log_eval(metrics, train_state_to_log_dict(runner_state[1], level_sampler))
-        jax.debug.callback(log_eval, metrics, train_state_to_log_dict(runner_state[1], level_sampler))
-        return (rng, train_state), {"update_count": metrics["update_count"]}
+        return (rng, train_state), metrics
 
     def log_checkpoint(update_count, train_state):
         if config["save_path"] is not None and config["checkpoint_save_freq"] > 1:
@@ -1068,10 +1071,10 @@ def main(config=None):
             save_model(train_state, steps, config)
 
     def train_eval_and_checkpoint_step(runner_state, _):
-        runner_state, metrics = jax.lax.scan(
-            train_and_eval_step, runner_state, xs=jnp.arange(config["checkpoint_save_freq"] // config["eval_freq"])
-        )
-        jax.debug.callback(log_checkpoint, metrics["update_count"][-1], runner_state[1])
+        for i in range(config["checkpoint_save_freq"] // config["eval_freq"]):
+            runner_state, metrics = train_and_eval_step(runner_state, i)
+            jax.debug.callback(log_eval, metrics, train_state_to_log_dict(runner_state[1], level_sampler))
+        jax.debug.callback(log_checkpoint, metrics["update_count"], runner_state[1])
         return runner_state, metrics
 
     # Set up the train states
@@ -1081,11 +1084,8 @@ def main(config=None):
     train_state = create_train_state(rng_init)
     runner_state = (rng_train, train_state)
 
-    runner_state, metrics = jax.lax.scan(
-        train_eval_and_checkpoint_step,
-        runner_state,
-        xs=jnp.arange((config["num_updates"]) // (config["checkpoint_save_freq"])),
-    )
+    for i in range((config["num_updates"]) // (config["checkpoint_save_freq"])):
+        runner_state, metrics = train_eval_and_checkpoint_step(runner_state, i)
 
     if config["save_policy"]:
         save_model(runner_state[1], config["total_timesteps"], config, is_final=True, save_to_wandb=config["use_wandb"])

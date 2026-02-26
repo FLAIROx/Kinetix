@@ -166,6 +166,8 @@ To run experiments with default parameters run any of the following:
 python3 experiments/sfl.py
 python3 experiments/plr.py
 python3 experiments/ppo.py
+
+python3 experiments/plr.py ued.replay_prob=0 # for DR
 ```
 
 We use [hydra](https://hydra.cc/) for managing our configs.  See the `configs/` folder for all the hydra configs that will be used by default, or the [docs](./docs/configs.md).
@@ -176,6 +178,11 @@ python3 experiments/sfl.py model.transformer_depth=8
 ```
 
 These experiments use [wandb](https://wandb.ai/home) for logging by default.
+
+
+> [!Note]
+> Experiments tend to run faster when you have JAX's [persistent compilation cache](https://docs.jax.dev/en/latest/persistent_compilation_cache.html) enabled, and you can set it, for instance, as `export JAX_COMPILATION_CACHE_DIR=.jax_cache`
+
 
 ## 🏋️ Training RL Agents
 We provide several different ways to train RL agents, with the three most common options being, (a) [Training an agent on random levels](#training-on-random-levels), (b) [Training an agent on a single, hand-designed level](#training-on-a-single-hand-designed-level) or (c) [Training an agent on a set of hand-designed levels](#training-on-a-set-of-hand-designed-levels).
@@ -208,6 +215,10 @@ Or, on a custom set:
 ```commandline
 python3 experiments/ppo.py eval=eval_auto train_levels=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
+
+# 💨 Compilation Speed
+Since Kinetix is quite complex, it generally takes quite a long time to compile. In particular, running `plr.py` or `sfl.py` may take a long time to get to actually executing code. This can be a burden when you are implementing new features, and just want to debug quickly. To make this easier, we provide two options: `train_levels=dummy env.dummy_env=True` (e.g. using `python experiments/sfl.py train_levels=dummy env.dummy_env=True`). These options replace the actual environment step and reset logic with no-ops, meaning that the compilation process will be much faster. However, no logic will be executed, so this is only to check syntax / shape / jax errors, and not to debug learning issues.
+
 
 # ❌ Errata
 - The left wall was erroneously misplaced 5cm to the left in all levels and all experiments in the paper (each level is a square with side lengths of 5 metres). This error has been fixed in the latest version of Jax2D, but we have pinned Kinetix to the old version for consistency and reproducability with the original paper.

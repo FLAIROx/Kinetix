@@ -114,6 +114,13 @@ def make_reset_fn_sample_kinetix_level(
     return reset
 
 
+def make_reset_fn_sample_empty_level(env_params: EnvParams, static_env_params: StaticEnvParams):
+    def reset(rng):
+        return create_empty_env(static_env_params)
+
+    return reset
+
+
 def make_vmapped_filtered_level_sampler(
     level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, env, ued_params: UEDParams = None
 ):
@@ -181,6 +188,8 @@ def make_reset_fn_from_config(
         reset_fn = make_reset_fn_custom_distribution(
             config["train_level_mode"], env_params, static_env_params, fn_kwargs=dict(ued_params=ued_params)
         )
+    elif config["train_level_mode"] == "dummy":
+        reset_fn = make_reset_fn_sample_empty_level(env_params, static_env_params)
     else:
         raise ValueError("Invalid Reset Function Provided")
 

@@ -1,3 +1,4 @@
+import dataclasses
 import jax.numpy as jnp
 from flax import struct
 from jax2d.sim_state import SimParams, SimState, StaticSimParams
@@ -30,6 +31,13 @@ class EnvParams(SimParams):
     dense_reward_scale: float = 0.1
     num_shape_roles: int = 4
 
+    def __hash__(self):
+        field_values = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        return hash(tuple(sorted(field_values.items())))
+
+    def __eq__(self, value):
+        return super().__eq__(value)
+
 
 @struct.dataclass
 class StaticEnvParams(StaticSimParams):
@@ -41,3 +49,10 @@ class StaticEnvParams(StaticSimParams):
 
     num_motor_bindings: int = 4
     num_thruster_bindings: int = 2
+
+    def __hash__(self):
+        field_values = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        return hash(tuple(sorted(field_values.items())))
+
+    def __eq__(self, value):
+        return super().__eq__(value)

@@ -1,3 +1,4 @@
+import dataclasses
 import math
 
 from flax import struct
@@ -51,3 +52,10 @@ class UEDParams:
     floor_prob_green: float = 0.0
     floor_prob_blue: float = 0.02
     floor_prob_red: float = 0.08
+
+    def __hash__(self):
+        field_values = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        return hash(tuple(sorted(field_values.items())))
+
+    def __eq__(self, value):
+        return super().__eq__(value)

@@ -101,7 +101,14 @@ def main(config):
 
     def make_env(static_env_params):
         env = LogWrapper(
-            make_kinetix_env(config["action_type"], config["observation_type"], None, env_params, static_env_params)
+            make_kinetix_env(
+                config["action_type"],
+                config["observation_type"],
+                None,
+                env_params,
+                static_env_params,
+                create_dummy_env=config["dummy_env"],
+            )
         )
         return env
 
@@ -242,7 +249,7 @@ def main(config):
                     return r, success, l
 
                 done_idxs = jnp.argwhere(dones, size=50, fill_value=max_steps).squeeze()
-                mask_done = jnp.where(done_idxs == max_steps, 0, 1)
+                mask_done = jnp.where(done_idxs == max_steps, False, True)
                 ep_return, success, length = __ep_outcomes(
                     jnp.concatenate([jnp.array([-1]), done_idxs[:-1]]), done_idxs
                 )
