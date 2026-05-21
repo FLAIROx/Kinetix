@@ -108,7 +108,6 @@ def make_render_entities(env_params, static_params, ignore_attention_mask=False)
             mask_n_squared = None
         else:
             mask_n_squared = make_n_squared_mask(mask_flat_shapes)
-
         return EntityObservation(
             circles=circle_nodes,
             polygons=poly_nodes,

@@ -1,0 +1,48 @@
+defaults:
+  - env: entity
+  - learning:
+      - ppo-base
+      - ppo-rnn
+  - misc: misc
+  - env_size: m
+  - eval: m
+  - train_levels: random
+  - model:
+      - model-base
+      - model-transformer
+      - model-perm-invariant-mlp
+  - _self_
+
+learning:
+  minibatch_size: 8192
+  lr: 0.0003
+  weight_decay: 0.0
+
+
+eval:
+  eval_freq: 4096
+
+misc:
+  checkpoint_save_freq: 32768
+
+
+seed: 0
+# If true, compute a separate BC loss for each action dimension and sum them, so that we can mask out inactive dimensions, which is important
+disentangled_bc_loss: true
+
+dataset_dir: null
+# True = TrajectoryDatasetManager (shape B,T,...); False = ShuffledDatasetManager (shape B,...)
+use_trajectory_data: True
+validation_batch_size: 8192
+
+# Fraction of the batch drawn from each dataset_dir entry (must sum to 1, multi-dataset only).
+dataset_proportions: [1]
+# Cap on the number of zarr shards to load; -1 uses all available shards.
+maximum_number_of_shards: -1
+
+compile_train_step: True
+# If true, also evaluate on a randomly sampled set of levels (s/m/l) in addition to the fixed eval set.
+eval_on_sml_sampled: False
+# If true, pad env_state arrays to static_env_params sizes after each batch load (needed if training on mixed-size datasets).
+should_expand_static_env_params: False
+verbose_logging: False

@@ -8,6 +8,7 @@ import chex
 import hydra
 import jax
 import jax.numpy as jnp
+from kinetix.util.train_utils import make_env
 import numpy as np
 import optax
 from flax import core, struct
@@ -452,20 +453,7 @@ def main(config=None):
         return metrics
 
     # Setup the environment.
-    def make_env(static_env_params):
-        env = LogWrapper(
-            make_kinetix_env(
-                config_for_env["action_type"],
-                config_for_env["observation_type"],
-                None,
-                env_params,
-                static_env_params,
-                create_dummy_env=config["dummy_env"],
-            )
-        )
-        return env
-
-    env = make_env(static_env_params)
+    env = make_env(config_for_env, static_env_params, env_params)
 
     sample_random_level = make_reset_fn_from_config(
         config, env_params, static_env_params, physics_engine=env.physics_engine
@@ -496,7 +484,7 @@ def main(config=None):
     )
 
     all_eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
-    eval_env = make_env(eval_static_env_params)
+    eval_env = make_env(config_for_env, eval_static_env_params, env_params)
 
     mutate_world = make_mutate_env(static_env_params, env_params, ued_params)
 

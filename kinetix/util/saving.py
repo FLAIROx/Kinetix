@@ -50,7 +50,7 @@ def load_evaluation_levels(eval_levels: list[str], static_env_params_override=No
     else:
         # get biggest static env params
         biggest_static_env_params = jax.tree.map(lambda *x: max(x), *all_static_env_params)
-        print(f"Created static_env_params={static_env_params} when loading evaluation levels.")
+        # print(f"Created static_env_params={static_env_params} when loading evaluation levels.")
 
     all_levels = [expand_env_state(l, biggest_static_env_params) for l in all_levels]
     _rngs = jax.random.split(jax.random.PRNGKey(0), len(all_levels))
@@ -234,7 +234,7 @@ def load_params_from_wandb_artifact_path(checkpoint_name):
 
 def save_params_to_wandb(params, timesteps, config):
     if config["checkpoint_human_numbers"]:
-        timesteps = str(round(timesteps / 1e9)) + "B"
+        timesteps = f"{timesteps / 1e9:.1f}B"
 
     run_name = config["run_name"] + "-" + str(config["random_hash"]) + "-" + str(timesteps)
     save_dir = os.path.join(config["save_path"], run_name)
@@ -255,9 +255,11 @@ def load_params_wandb_artifact_path_full_model(checkpoint_name):
     return all_dict["params"]
 
 
-def load_train_state_from_wandb_artifact_path(train_state, checkpoint_name, load_only_params=False):
+def load_train_state_from_wandb_artifact_path(
+    train_state, checkpoint_name, load_only_params=False, specific_dir=None, return_extra=False
+):
     api = wandb.Api()
-    name = api.artifact(checkpoint_name).download()
+    name = api.artifact(checkpoint_name).download(specific_dir)
     all_dict = load_params(name + "/full_model.pbz2")
     train_state = train_state.replace(params=all_dict["params"])
     if not load_only_params:
@@ -265,6 +267,8 @@ def load_train_state_from_wandb_artifact_path(train_state, checkpoint_name, load
             # step=all_dict["step"],
             opt_state=all_dict["opt_state"]
         )
+    if return_extra:
+        return train_state, all_dict["extra"]
     return train_state
 
 
@@ -273,7 +277,7 @@ def save_params_to_wandb(params, timesteps, config):
 
 
 def save_dict(dict, timesteps, config, name, save_to_wandb: bool = True):
-    timesteps = str(round(timesteps / 1e9)) + "B"
+    timesteps = f"{timesteps / 1e9:.1f}B"
     run_name = config["run_name"] + "-" + str(config["random_hash"]) + "-" + str(timesteps)
     save_dir = os.path.join(config["save_path"], run_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -287,8 +291,9 @@ def save_dict(dict, timesteps, config, name, save_to_wandb: bool = True):
     print(f"Parameters of model saved in {save_dir}/{name}.pbz2")
 
 
-def save_model(train_state, timesteps, config, is_final=False, save_to_wandb: bool = True):
+def save_model(train_state, timesteps, config, is_final=False, save_to_wandb: bool = True, extra=None):
     dict_to_use = {"step": train_state.step, "params": train_state.params, "opt_state": train_state.opt_state}
+    dict_to_use["extra"] = extra
     step = int(train_state.step)
     if config["economical_saving"]:
         if step in [2048, 10240, 40960, 81920] or is_final:

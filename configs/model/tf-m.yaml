@@ -1,0 +1,9 @@
+override_model_depth: 1
+override_model_width: 256
+transformer_depth: 3
+transformer_size: 128
+transformer_encoder_size: 512
+num_heads: 8
+transformer_ffn: True
+multilayer_joint_thruster_mixing: True
+model_name: tf-m

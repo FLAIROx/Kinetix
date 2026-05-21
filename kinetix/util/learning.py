@@ -11,7 +11,9 @@ from flax.training.train_state import TrainState
 
 from gymnax import EnvParams, EnvState
 from gymnax.environments.environment import Environment
-from kinetix.models.actor_critic import ScannedRNN
+from kinetix.environment.spaces import ObservationType
+from kinetix.models.actor_critic import GeneralActorCriticRNN, ScannedRNN
+from flax import struct
 
 Observation = typing.Any
 
@@ -27,6 +29,8 @@ def evaluate_rnn(  # from jaxued
     max_episode_length: int,
     keep_states=True,
     return_trajectories=False,
+    observation_preprocessing_fn=None,
+    temperature=1.0,
 ) -> Tuple[chex.Array, chex.Array, chex.Array]:
     """This runs the RNN on the environment, given an initial state and observation, and returns (states, rewards, episode_lengths)
 
@@ -49,9 +53,15 @@ def evaluate_rnn(  # from jaxued
         rng, hstate, obs, state, done, mask, episode_length = carry
         rng, rng_action, rng_step = jax.random.split(rng, 3)
 
-        x = jax.tree.map(lambda x: x[None, ...], (obs, done))
+        obs_to_use = observation_preprocessing_fn(obs) if observation_preprocessing_fn is not None else obs
+        x = jax.tree.map(lambda x: x[None, ...], (obs_to_use, done))
         hstate, pi, _ = train_state.apply_fn(train_state.params, hstate, x)
-        action = pi.sample(seed=rng_action).squeeze(0)
+        
+        # We now handle temperature directly in the action distribution classes
+        if temperature == 1.0:
+            action = pi.sample(seed=rng_action).squeeze(0)
+        else:
+            action = jax.tree.map(lambda x: x[0], pi._sample_n(rng_action, 1, temperature=temperature)).squeeze(0)
 
         obs, next_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
             jax.random.split(rng_step, num_levels),
@@ -101,7 +111,8 @@ def general_eval(
     num_levels: int,
     keep_states=True,
     return_trajectories=False,
-    initialize_carry_fn=ScannedRNN.initialize_carry,
+    observation_preprocessing_fn=None,
+    temperature=1.0,
 ):
     """
     This evaluates the current policy on the set of evaluation levels
@@ -111,7 +122,7 @@ def general_eval(
     init_obs, init_env_state = jax.vmap(eval_env.reset, (0, None, 0))(
         jax.random.split(rng_reset, num_levels), env_params, levels
     )
-    init_hstate = initialize_carry_fn(num_levels)
+    init_hstate = GeneralActorCriticRNN.initialize_carry(num_levels)
     (states, rewards, done_idx, episode_lengths, infos), (dones, reward) = evaluate_rnn(
         rng,
         eval_env,
@@ -123,6 +134,8 @@ def general_eval(
         num_eval_steps,
         keep_states=keep_states,
         return_trajectories=True,
+        observation_preprocessing_fn=observation_preprocessing_fn,
+        temperature=temperature,
     )
     mask = jnp.arange(num_eval_steps)[..., None] < episode_lengths
     cum_rewards = (rewards * mask).sum(axis=0)
@@ -317,7 +330,7 @@ def update_actor_critic_rnn(
             if update_grad:
                 train_state = train_state.apply_gradients(grads=grads)
             grad_norm = jnp.linalg.norm(
-                jnp.concatenate(jax.tree.map(lambda x: x.flatten(), jax.tree_util.tree_flatten(grads)[0]))
+                jnp.concatenate(jax.tree.tree_map(lambda x: x.flatten(), jax.tree_util.tree_flatten(grads)[0]))
             )
             return train_state, (loss, grad_norm)
 
@@ -444,7 +457,7 @@ def sample_trajectories_and_learn(
         carry = (rng, train_state, init_hstate, init_obs, init_env_state)
         new_carry, all_rollouts = jax.lax.scan(single_step, carry, None, length=config["outer_rollout_steps"])
 
-        all_rollouts = jax.tree.map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
+        all_rollouts = jax.tree.tree_map(lambda x: jnp.concatenate(x, axis=0), all_rollouts)
         return new_carry, all_rollouts
 
     return inner(rng, train_state, init_hstate, init_obs, init_env_state)
@@ -517,3 +530,119 @@ def no_op_and_random_rollout(
         env, env_params, rng, init_obs, init_env_state, num_envs, max_episode_length, do_random=True
     )
     return returns_noop, lens_noop, success_noop, returns_random, lens_random, success_random
+
+
+# Running Mean Standard from here: https://github.com/SonyResearch/simba/blob/master/scale_rl/agents/wrappers/utils.py#L9
+
+
+@struct.dataclass
+class RunningMeanStandard:
+    mean: jnp.ndarray
+    var: jnp.ndarray
+    count: float
+    epsilon: float
+
+
+def rms_should_normalise(x):
+    # only normalise floats
+    return jnp.issubdtype(x.dtype, jnp.floating)
+
+
+def rms_is_leaf(node):
+    if isinstance(node, RunningMeanStandard):
+        return True
+    return jax.tree_util.all_leaves((node,))
+    # return not isinstance(node, (list, tuple, dict)) and not hasattr(node, '__jax_tree_unflatten__')
+
+
+def rms_init_from_batch(obs, observation_type: ObservationType, epsilon=1e-4):
+    # So, obs is a batch, and we want to decide what the `base` observation is that we want to RMS
+    # For symbolic, we want to take the final dimension, so the RMS is of shape (K, )
+    # For entity, we also want to take the final dimension (e.g., we RMS all polygons to the same value instead of RMS-ing polygon 0 separately from polygon 1)
+    # For pixels, we want to keep the last three dimensions
+
+    if observation_type in [ObservationType.SYMBOLIC_FLAT, ObservationType.SYMBOLIC_FLAT_PADDED]:
+        how_many_zeros = 2  # this just needs to get rid of the time and batch dimension
+    elif observation_type == ObservationType.SYMBOLIC_ENTITY:
+        how_many_zeros = 3  # this has to get rid of the time, batch and then entity dimension
+    elif observation_type == ObservationType.PIXELS:
+        how_many_zeros = 2  # this just needs to get rid of the time and batch dimension
+    else:
+        raise ValueError(f"Unknown Observation Type {observation_type}")
+
+    index = tuple([0] * how_many_zeros)
+    obs_to_use = jax.tree.map(lambda x: x[index], obs)
+    # print(f"RMS:: Shape of {jax.tree.map(jnp.shape, obs_to_use)}")
+    return rms_init(obs_to_use, epsilon)
+
+
+def rms_init(obs, epsilon=1e-4):
+    return jax.tree.map(
+        lambda x: RunningMeanStandard(
+            jnp.zeros(x.shape, x.dtype),
+            jnp.ones(x.shape, x.dtype),
+            epsilon,
+            epsilon,
+        ),
+        obs,
+    )
+
+
+def rms_update(rms: RunningMeanStandard, observations: jnp.ndarray, flatten: bool | str = False) -> RunningMeanStandard:
+    def _inner(inner_rms, obs):
+        if not rms_should_normalise(obs):
+            return inner_rms
+
+        if flatten == "auto":
+            how_many_rms_dims = len(inner_rms.mean.shape)
+            obs = obs.reshape((-1, *obs.shape[-how_many_rms_dims:]))
+        elif flatten:
+            assert len(obs.shape) > 2
+            obs = obs.reshape((-1, *obs.shape[2:]))
+
+        batch_mean = jnp.mean(obs, axis=0)
+        batch_var = jnp.var(obs, axis=0)
+        batch_count = obs.shape[0]
+
+        delta = batch_mean - inner_rms.mean
+        tot_count = inner_rms.count + batch_count
+
+        new_mean = inner_rms.mean + delta * batch_count / tot_count
+        m_a = inner_rms.var * inner_rms.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + jnp.square(delta) * inner_rms.count * batch_count / tot_count
+        new_var = M2 / tot_count
+        new_count = tot_count
+
+        return inner_rms.replace(mean=new_mean, var=new_var, count=new_count)
+
+    return jax.tree.map(_inner, rms, observations, is_leaf=rms_is_leaf)
+
+
+def rms_normalise(rms: RunningMeanStandard, observations: jnp.ndarray, flatten: bool | str = False) -> jnp.ndarray:
+    def _inner(inner_rms, obs):
+        if not rms_should_normalise(obs):
+            return obs
+
+        if flatten == "auto":
+            assert len(obs.shape) > len(inner_rms.mean.shape)
+            assert obs.shape[-len(inner_rms.mean.shape) :] == inner_rms.mean.shape
+            mean = jnp.broadcast_to(inner_rms.mean, obs.shape)
+            var = jnp.broadcast_to(inner_rms.var, obs.shape)
+        else:
+            if flatten:
+                assert (
+                    len(obs.shape) == len(inner_rms.mean.shape) + 2
+                ), f"Shape mismatch: {obs.shape} and {inner_rms.mean.shape}"
+                assert obs.shape[2:] == inner_rms.mean.shape
+                mean, var = inner_rms.mean[None, None], inner_rms.var[None, None]
+            else:
+                assert (
+                    len(obs.shape) == len(inner_rms.mean.shape) + 1
+                ), f"Shape mismatch: {obs.shape} and {inner_rms.mean.shape}"
+                assert obs.shape[1:] == inner_rms.mean.shape
+                mean, var = inner_rms.mean[None], inner_rms.var[None]
+
+        return (obs - mean) / jnp.sqrt(var + inner_rms.epsilon)
+
+    return jax.tree.map(_inner, rms, observations, is_leaf=rms_is_leaf)

@@ -4,3 +4,10 @@ transformer_encoder_size: 128
 num_heads: 8
 full_attention_mask: false
 aggregate_mode: dummy_and_mean
+
+transformer_ffn: False
+multilayer_joint_thruster_mixing: False
+# these two are only active when multilayer_joint_thruster_mixing = True
+joint_thruster_block_num_layers: 2
+joint_thruster_block_hidden_dim_multiplication: 4
+dropout_prob: 0.0

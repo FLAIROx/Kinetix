@@ -1,11 +1,21 @@
+import functools
+import math
 import os
 import time
 from typing import Any, NamedTuple
 
 import hydra
 import jax
+
+try:
+    jax.distributed.initialize(local_device_ids="")  # local_device_ids="" to let jax pick devices
+    print("[INFO] Running across multiple nodes")
+except Exception as e:
+    print("[INFO] Running in single-node mode")
+
 import jax.numpy as jnp
-from kinetix.environment import make_reset_fn_from_config
+from jax.sharding import PartitionSpec
+
 import numpy as np
 import optax
 from flax.serialization import to_state_dict
@@ -13,21 +23,38 @@ from flax.training.train_state import TrainState
 from omegaconf import OmegaConf
 
 import wandb
-from kinetix.environment import LogWrapper
-from kinetix.environment.env import make_kinetix_env
-from kinetix.environment import PixelObservations
-from kinetix.models import ScannedRNN, make_network_from_config
-from kinetix.render.renderer_pixels import make_render_pixels
+from kinetix.data import get_valid_action_mask
+from kinetix.environment import EnvParams, KinetixEnv, make_reset_fn_from_config
+from kinetix.models import GeneralActorCriticRNN, make_network_from_config
+from kinetix.render import make_render_pixels
 from kinetix.util import (
-    general_eval,
+    EpisodeMetrics,
+    EvalSpec,
+    RunningMeanStandard,
+    create_eval_metrics_dict_for_logging,
     generate_params_from_config,
-    load_evaluation_levels,
     get_video_frequency,
     init_wandb,
+    load_evaluation_levels,
     load_train_state_from_wandb_artifact_path,
+    make_eval_fn,
+    make_fake_video,
+    make_video_fn,
     normalise_config,
+    parallel_rms_update,
+    rms_init,
+    rms_normalise,
     save_model,
 )
+from kinetix.util.train_utils import (
+    compute_gns_metrics,
+    get_logger,
+    get_randomly_sampled_eval_levels,
+    make_env,
+    weight_norm,
+)
+
+logger = get_logger()
 
 os.environ["WANDB_DISABLE_SERVICE"] = "True"
 
@@ -40,20 +67,30 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: Any
     info: jnp.ndarray
+    valid_action_mask: jnp.ndarray
 
 
-def make_train(config, env_params, static_env_params):
-    config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
-    config["minibatch_size"] = config["num_train_envs"] * config["num_steps"] // config["num_minibatches"]
+class RunnerState(NamedTuple):
+    train_state: Any
+    env_state: Any
+    last_obs: Any
+    last_done: jnp.ndarray
+    extra: dict
+    hstate: Any
+    rng: jnp.ndarray
+    update_step: jnp.ndarray
 
-    def make_env(reset_fn, static_env_params):
-        return LogWrapper(
-            make_kinetix_env(config["action_type"], config["observation_type"], reset_fn, env_params, static_env_params)
-        )
 
-    eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
-    env = make_env(make_reset_fn_from_config(config, env_params, static_env_params), static_env_params)
-    eval_env = make_env(None, eval_static_env_params)
+def get_train_state_from_config(config, rng: jax.Array, env: KinetixEnv, env_params: EnvParams):
+    dummy_batch_dim = 1
+    network = make_network_from_config(env, env_params, config)
+    rng, _rng = jax.random.split(rng)
+    obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, dummy_batch_dim), env_params)
+    dones = jnp.zeros((dummy_batch_dim), dtype=jnp.bool_)
+    rng, _rng = jax.random.split(rng)
+    init_hstate = GeneralActorCriticRNN.initialize_carry(dummy_batch_dim)
+    init_x = jax.tree.map(lambda x: x[None, ...], (obsv, dones))
+    network_params = {"params": network.init(_rng, init_hstate, init_x)["params"]}
 
     def linear_schedule(count):
         frac = 1.0 - (count // (config["num_minibatches"] * config["update_epochs"])) / config["num_updates"]
@@ -73,91 +110,148 @@ def make_train(config, env_params, static_env_params):
             config["peak_lr"] * jnp.maximum(0.0, 0.5 * (1.0 + jnp.cos(jnp.pi * ((frac_cosine) % 1.0)))),
         )
 
+    if config["anneal_lr"]:
+        lr_to_use = linear_schedule
+    elif config["warmup_lr"]:
+        lr_to_use = linear_warmup_cosine_decay_schedule
+    else:
+        lr_to_use = config["lr"]
+    tx = optax.chain(
+        optax.clip_by_global_norm(config["max_grad_norm"]),
+        optax.adam(lr_to_use, eps=1e-5),
+    )
+    train_state = TrainState.create(
+        apply_fn=network.apply,
+        params=network_params,
+        tx=tx,
+    )
+
+    return train_state
+
+
+def make_train(config, ppo_env_params, static_env_params, return_update_step_and_init_state: bool = False):
+    NUM_GPUS = jax.device_count()
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=["devices"])
+
+    replicated_sharding = jax.sharding.NamedSharding(mesh, PartitionSpec())
+    partitioned_sharding = jax.sharding.NamedSharding(mesh, PartitionSpec("devices"))
+
+    config["num_updates"] = config["total_timesteps"] // config["num_steps"] // config["num_train_envs"]
+    config["num_gpus"] = NUM_GPUS
+    config["num_train_envs"] = config["num_train_envs"] // NUM_GPUS
+
+    reset_fn = make_reset_fn_from_config(config, ppo_env_params, static_env_params)
+
+    eval_levels, eval_static_env_params = load_evaluation_levels(config["eval_levels"])
+    ppo_env = make_env(config, static_env_params, ppo_env_params, reset_fn)
+    eval_env = make_env(config, eval_static_env_params, ppo_env_params, None)
+
+    NUM_EVAL_DR_LEVELS = 512
+    DR_EVAL_LEVELS = get_randomly_sampled_eval_levels(
+        config, ppo_env_params, static_env_params, ppo_env, NUM_EVAL_DR_LEVELS
+    )
+
+    all_eval_specs = {
+        "hand_designed": EvalSpec(
+            levels_to_eval_on=eval_levels,
+            number_of_levels=len(config["eval_levels"]),
+            level_names=config["eval_levels"],
+            plot_videos=True,
+            num_envs_to_video=-1,
+        ),
+        "sampled": EvalSpec(
+            levels_to_eval_on=DR_EVAL_LEVELS,
+            number_of_levels=NUM_EVAL_DR_LEVELS,
+            level_names=[f"DR/{str(i).zfill(3)}" for i in range(NUM_EVAL_DR_LEVELS)],
+            plot_videos=True,
+            num_envs_to_video=10,
+        ),
+    }
+
     time_start = time.time()
 
     def train(rng):
+        def _maybe_normalise(
+            rms: RunningMeanStandard, obs: jnp.ndarray, should_update=True
+        ) -> tuple[RunningMeanStandard, jnp.ndarray]:
+            if config["rms_norm"]:
+                new_obs = rms_normalise(rms, obs, flatten="auto")
+                if should_update:
+                    rms = parallel_rms_update(rms, obs)
+            else:
+                new_obs = obs
+
+            return rms, new_obs
+
         last_time = time.time()
         # INIT NETWORK
-        network = make_network_from_config(env, env_params, config)
         rng, _rng = jax.random.split(rng)
-        obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
-        dones = jnp.zeros((config["num_train_envs"]), dtype=jnp.bool_)
-        rng, _rng = jax.random.split(rng)
-        init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
-        init_x = jax.tree.map(lambda x: x[None, ...], (obsv, dones))
-        network_params = network.init(_rng, init_hstate, init_x)
+        train_state = get_train_state_from_config(config, _rng, ppo_env, ppo_env_params)
 
-        param_count = sum(x.size for x in jax.tree_util.tree_leaves(network_params))
-        obs_size = sum(x.size for x in jax.tree_util.tree_leaves(obsv)) // config["num_train_envs"]
-
-        print("Number of parameters", param_count, "size of obs: ", obs_size)
-        if config["anneal_lr"]:
-            tx = optax.chain(
-                optax.clip_by_global_norm(config["max_grad_norm"]),
-                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+        new_extra = None
+        if config["load_from_checkpoint"] is not None:
+            logger.info(
+                "Loading checkpoint from %s (load_only_params=%s)",
+                config["load_from_checkpoint"],
+                config["load_only_params"],
             )
-        elif config["warmup_lr"]:
-            tx = optax.chain(
-                optax.clip_by_global_norm(config["max_grad_norm"]),
-                optax.adamw(learning_rate=linear_warmup_cosine_decay_schedule, eps=1e-5),
+            train_state, new_extra = load_train_state_from_wandb_artifact_path(
+                train_state,
+                config["load_from_checkpoint"],
+                load_only_params=config["load_only_params"],
+                return_extra=True,
+                specific_dir="/tmp",
             )
-        else:
-            tx = optax.chain(
-                optax.clip_by_global_norm(config["max_grad_norm"]),
-                optax.adam(config["lr"], eps=1e-5),
-            )
-        train_state = TrainState.create(
-            apply_fn=network.apply,
-            params=network_params,
-            tx=tx,
-        )
-        if config["load_from_checkpoint"] != None:
-            print("LOADING from", config["load_from_checkpoint"], "with only params =", config["load_only_params"])
-            train_state = load_train_state_from_wandb_artifact_path(
-                train_state, config["load_from_checkpoint"], load_only_params=config["load_only_params"]
-            )
+            assert new_extra is not None
         # INIT ENV
         rng, _rng = jax.random.split(rng)
-        obsv, env_state = jax.vmap(env.reset, (0, None))(jax.random.split(_rng, config["num_train_envs"]), env_params)
-        init_hstate = ScannedRNN.initialize_carry(config["num_train_envs"])
-        render_static_env_params = eval_env.static_env_params.replace(downscale=4)
-        pixel_renderer = jax.jit(make_render_pixels(env_params, render_static_env_params))
+
+        def _init(rng):
+            rng = rng.squeeze(0)
+            obsv, env_state = jax.vmap(ppo_env.reset, (0, None))(
+                jax.random.split(rng, config["num_train_envs"]), ppo_env_params
+            )
+            init_hstate = GeneralActorCriticRNN.initialize_carry(config["num_train_envs"])
+            init_dones = jnp.zeros((config["num_train_envs"]), dtype=bool)
+
+            return obsv, env_state, init_hstate, init_dones
+
+        _init_shard_mapped = jax.jit(
+            jax.shard_map(
+                _init,
+                mesh=mesh,
+                in_specs=(PartitionSpec("devices"),),
+                out_specs=PartitionSpec("devices"),
+                check_vma=False,
+            )
+        )
+        rngs_per_device = jax.device_put(jax.random.split(_rng, NUM_GPUS), partitioned_sharding)
+        obsv, env_state, init_hstate, init_dones = _init_shard_mapped(rngs_per_device)
+
+        render_static_env_params = eval_env.static_env_params.replace(downscale=1, screen_dim=(125, 125))
+        render_env_params = ppo_env_params.replace(pixels_per_unit=25)
+        pixel_renderer = jax.jit(make_render_pixels(render_env_params, render_static_env_params))
         pixel_render_fn = lambda x: pixel_renderer(x) / 255.0
+        video_fn = make_video_fn(render_env_params, render_static_env_params, pixel_render_fn)
+
+        initial_extra = new_extra if new_extra is not None else {"rms": rms_init(jax.tree.map(lambda x: x[0], obsv))}
 
         def _vmapped_eval_step(runner_state, rng):
-            def _single_eval_step(rng):
-                return general_eval(
-                    rng,
-                    eval_env,
-                    env_params,
-                    runner_state[0],
-                    eval_levels,
-                    env_params.max_timesteps,
-                    config["num_eval_levels"],
-                    keep_states=True,
-                    return_trajectories=True,
-                )
-
-            (states, returns, done_idxs, episode_lengths, eval_infos), (eval_dones, eval_rewards) = jax.vmap(
-                _single_eval_step
-            )(jax.random.split(rng, config["eval_num_attempts"]))
-            mask = jnp.arange(env_params.max_timesteps)[None, ..., None] < episode_lengths[:, None, :]
-            eval_solves = (eval_infos["returned_episode_solved"] * eval_dones * mask).sum(axis=1) / jnp.maximum(
-                1, (eval_dones * mask).sum(axis=1)
+            eval_fn = make_eval_fn(
+                eval_env,
+                ppo_env_params,
+                config["eval_num_attempts"],
+                observation_preprocessing_fn=lambda obs: _maybe_normalise(runner_state.extra["rms"], obs)[1],
+                fixed_video_rng=jax.random.PRNGKey(102),
             )
-            states_to_plot = jax.tree.map(lambda x: x[0], states)
 
-            return (
-                states_to_plot,
-                done_idxs[0],
-                returns[0],
-                returns.mean(axis=0),
-                episode_lengths.mean(axis=0),
-                eval_solves.mean(axis=0),
-            )
+            return eval_fn(rng, runner_state.train_state, all_eval_specs)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
+            # squeeze the RNG (undoes expand_dims added at the end of the previous step for sharding)
+            runner_state = runner_state._replace(rng=runner_state.rng.squeeze(0))
+
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused):
                 (
@@ -165,15 +259,23 @@ def make_train(config, env_params, static_env_params):
                     env_state,
                     last_obs,
                     last_done,
+                    extra,
                     hstate,
                     rng,
                     update_step,
                 ) = runner_state
 
+                extra["rms"], obs_to_use = _maybe_normalise(extra["rms"], last_obs, should_update=True)
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                ac_in = (jax.tree.map(lambda x: x[np.newaxis, :], last_obs), last_done[np.newaxis, :])
-                hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
+                ac_in = (
+                    jax.tree.map(lambda x: x[np.newaxis, :], obs_to_use),
+                    last_done[np.newaxis, :],
+                )
+
+                hstate, pi, value = train_state.apply_fn(train_state.params, hstate, ac_in)
+                obs_to_save = last_obs
+
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
                 value, action, log_prob = (
@@ -184,22 +286,23 @@ def make_train(config, env_params, static_env_params):
 
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
-                    jax.random.split(_rng, config["num_train_envs"]), env_state, action, env_params
-                )
-                transition = Transition(last_done, action, value, reward, log_prob, last_obs, info)
-                runner_state = (
-                    train_state,
+
+                valid_action_mask = get_valid_action_mask(env_state, static_env_params, action)
+
+                obsv, env_state, reward, done, info = jax.vmap(ppo_env.step, in_axes=(0, 0, 0, None))(
+                    jax.random.split(_rng, config["num_train_envs"]),
                     env_state,
-                    obsv,
-                    done,
-                    hstate,
-                    rng,
-                    update_step,
+                    action,
+                    ppo_env_params,
                 )
+
+                transition = Transition(
+                    last_done, action, value, reward, log_prob, obs_to_save, info, valid_action_mask=valid_action_mask
+                )
+                runner_state = RunnerState(train_state, env_state, obsv, done, extra, hstate, rng, update_step)
                 return runner_state, transition
 
-            initial_hstate = runner_state[-3]
+            initial_hstate = runner_state.hstate
             runner_state, traj_batch = jax.lax.scan(_env_step, runner_state, None, config["num_steps"])
 
             # CALCULATE ADVANTAGE
@@ -208,12 +311,17 @@ def make_train(config, env_params, static_env_params):
                 env_state,
                 last_obs,
                 last_done,
+                extra,
                 hstate,
                 rng,
                 update_step,
             ) = runner_state
-            ac_in = (jax.tree.map(lambda x: x[np.newaxis, :], last_obs), last_done[np.newaxis, :])
-            _, _, last_val = network.apply(train_state.params, hstate, ac_in)
+            _, obs_to_use = _maybe_normalise(extra["rms"], last_obs, should_update=False)
+            ac_in = (
+                jax.tree.map(lambda x: x[np.newaxis, :], obs_to_use),
+                last_done[np.newaxis, :],
+            )
+            _, _, last_val = train_state.apply_fn(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
 
             def _calculate_gae(traj_batch, last_val, last_done):
@@ -246,7 +354,12 @@ def make_train(config, env_params, static_env_params):
 
                     def _loss_fn(params, init_hstate, traj_batch, gae, targets):
                         # RERUN NETWORK
-                        _, pi, value = network.apply(params, init_hstate[0], (traj_batch.obs, traj_batch.done))
+                        _, obs_to_use = jax.vmap(
+                            functools.partial(_maybe_normalise, should_update=False),
+                            (None, 0),
+                        )(extra["rms"], traj_batch.obs)
+                        _, pi, value = train_state.apply_fn(params, init_hstate[0], (obs_to_use, traj_batch.done))
+
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -273,11 +386,32 @@ def make_train(config, env_params, static_env_params):
                         loss_actor = loss_actor.mean()
                         entropy = pi.entropy().mean()
 
+                        entropy_disentangled = pi.entropy_disentangled()
+                        action_mask = traj_batch.valid_action_mask
+                        entropy_disentangled_mean = (
+                            (entropy_disentangled * action_mask).sum(axis=-1) / jnp.maximum(1, action_mask.sum(axis=-1))
+                        ).mean()
+
                         total_loss = loss_actor + config["vf_coef"] * value_loss - config["ent_coef"] * entropy
-                        return total_loss, (value_loss, loss_actor, entropy)
+
+                        return total_loss, {
+                            "loss/value": value_loss,
+                            "loss/entropy": entropy,
+                            "loss/actor": loss_actor,
+                            "loss/total": total_loss,
+                            "metrics/entropy_disentangled": entropy_disentangled_mean,
+                        }
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(train_state.params, init_hstate, traj_batch, advantages, targets)
+                    total_loss = jax.lax.pmean(total_loss, axis_name="devices")
+                    g_squared, s, grad_norm, grads = compute_gns_metrics(grads, advantages.shape[0])
+                    total_loss = total_loss[0], total_loss[1] | {
+                        "metrics/g_squared": jnp.mean(g_squared),
+                        "metrics/s": jnp.mean(s),
+                        "metrics/grad_norm": jnp.mean(grad_norm),
+                    }
+
                     train_state = train_state.apply_gradients(grads=grads)
                     return train_state, total_loss
 
@@ -293,7 +427,30 @@ def make_train(config, env_params, static_env_params):
                 permutation = jax.random.permutation(_rng, config["num_train_envs"])
                 batch = (init_hstate, traj_batch, advantages, targets)
 
-                shuffled_batch = jax.tree.map(lambda x: jnp.take(x, permutation, axis=1), batch)
+                if config["full_minibatch_shuffle"]:
+                    assert not config["recurrent_model"], "Full minibatch shuffle only works with non-recurrent models"
+
+                    # Properly shuffle across ALL dimensions (steps and envs)
+                    num_elements = config["num_steps"] * config["num_train_envs"]
+                    full_permutation = jax.random.permutation(_rng, num_elements)
+
+                    def reshuffle(x):
+                        # x has shape (num_steps, num_train_envs, ...)
+                        orig_shape = x.shape
+                        x = x.reshape((num_elements,) + orig_shape[2:])
+                        x = jnp.take(x, full_permutation, axis=0)
+                        x = x.reshape(orig_shape)
+                        return x
+
+                    # We don't shuffle init_hstate because it's per-env, but it's irrelevant for non-recurrent models anyway.
+                    # We shuffle traj_batch, advantages, and targets.
+                    shuffled_traj_batch = jax.tree.map(reshuffle, traj_batch)
+                    shuffled_advantages = reshuffle(advantages)
+                    shuffled_targets = reshuffle(targets)
+
+                    shuffled_batch = (init_hstate, shuffled_traj_batch, shuffled_advantages, shuffled_targets)
+                else:
+                    shuffled_batch = jax.tree.map(lambda x: jnp.take(x, permutation, axis=1), batch)
 
                 minibatches = jax.tree.map(
                     lambda x: jnp.swapaxes(
@@ -318,7 +475,7 @@ def make_train(config, env_params, static_env_params):
                 )
                 return update_state, total_loss
 
-            init_hstate = initial_hstate[None, :]  # TBH
+            init_hstate = jax.tree.map(lambda x: x[None, :], initial_hstate)
             update_state = (
                 train_state,
                 init_hstate,
@@ -333,52 +490,60 @@ def make_train(config, env_params, static_env_params):
                 lambda x: (x * traj_batch.info["returned_episode"]).sum() / traj_batch.info["returned_episode"].sum(),
                 traj_batch.info,
             )
+            metrics_to_log = jax.tree.map(lambda x: x.mean(), loss_info[1])
+            metrics_to_log["metrics/gns"] = metrics_to_log["metrics/s"] / metrics_to_log["metrics/g_squared"]
             rng = update_state[-1]
 
             if config["use_wandb"]:
-
-                def _fake_video():
-                    return jnp.zeros(
-                        (
-                            env_params.max_timesteps,
-                            config["num_eval_levels"],
-                            *PixelObservations(env_params, render_static_env_params)
-                            .observation_space(env_params)
-                            .shape,
-                        )
-                    )
+                param_metrics = {"metrics/param_norm": weight_norm(train_state.params)}
 
                 def _real_eval(rng, update_step):
-                    vid_frequency = get_video_frequency(config, update_step)
                     rng, _rng = jax.random.split(rng)
-                    to_log_videos = _vmapped_eval_step(runner_state, _rng)
+
+                    # eval
+                    eval_metrics = _vmapped_eval_step(runner_state, _rng)
+
+                    # maybe make video
+                    vid_frequency = get_video_frequency(config, update_step)
                     should_log_videos = update_step % vid_frequency == 0
-                    first = jax.lax.cond(
-                        should_log_videos,
-                        lambda: jax.vmap(jax.vmap(pixel_render_fn))(to_log_videos[0].env_state),
-                        lambda: (_fake_video()),
-                    )
-                    return (first, should_log_videos, True, *to_log_videos[1:])
+                    videos = video_fn(should_log_videos, eval_metrics)
+
+                    # return just episode metrics
+                    ep_metrics = {k: v.episode_metrics for k, v in eval_metrics.items()}
+                    return (ep_metrics, True), (videos, should_log_videos)
 
                 def _fake_eval(rng, update_step):
-
-                    return (
-                        _fake_video(),
-                        False,
-                        False,
-                        jnp.zeros((config["num_eval_levels"],), jnp.int32),  # lengths
-                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # returns for video
-                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # returns avg
-                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # ep lengths avg
-                        jnp.zeros((config["num_eval_levels"],), jnp.float32),  # solve avg
-                    )
+                    fake_videos = {
+                        k: make_fake_video(
+                            render_env_params,
+                            render_static_env_params,
+                            v.num_envs_to_video if v.num_envs_to_video > 0 else v.number_of_levels,
+                        )
+                        for k, v in all_eval_specs.items()
+                        if v.plot_videos
+                    }
+                    ep_metrics = {k: EpisodeMetrics.create_empty(v.number_of_levels) for k, v in all_eval_specs.items()}
+                    return (ep_metrics, False), (fake_videos, False)
 
                 rng, _rng = jax.random.split(rng)
-                to_log_videos = jax.lax.cond(
-                    update_step % config["eval_freq"] == 0, _real_eval, _fake_eval, _rng, update_step
+                should_eval = jnp.logical_and(config["eval_freq"] > 0, update_step % config["eval_freq"] == 0)
+                all_eval_metrics, all_video_metrics = jax.lax.cond(
+                    should_eval,
+                    _real_eval,
+                    _fake_eval,
+                    _rng,
+                    update_step,
                 )
 
-                def callback(metric, raw_info, loss_info, update_step, to_log_videos):
+                def callback(
+                    raw_info,
+                    update_step,
+                    all_eval_metrics,
+                    should_log_evals,
+                    all_video_metrics,
+                    should_log_videos,
+                    metrics_to_log,
+                ):
                     nonlocal last_time
                     time_now = time.time()
                     delta_time = time_now - last_time
@@ -392,69 +557,134 @@ def make_train(config, env_params, static_env_params):
                         "episode_length": (raw_info["returned_episode_lengths"] * dones).sum()
                         / jnp.maximum(1, dones.sum()),
                         "num_completed_episodes": dones.sum(),
+                        **metrics_to_log,
                     }
                     to_log["timing/num_updates"] = update_step
-                    to_log["timing/num_env_steps"] = (
-                        int(update_step) * int(config["num_steps"]) * int(config["num_train_envs"])
+                    to_log["timing/num_model_forward_passes"] = int(update_step) * (
+                        int(config["num_steps"]) + config["num_minibatches"] * config["update_epochs"]
                     )
-                    to_log["timing/sps"] = (config["num_steps"] * config["num_train_envs"]) / delta_time
+                    to_log["timing/num_model_backward_passes"] = int(update_step) * (
+                        config["num_minibatches"] * config["update_epochs"]
+                    )
+                    to_log["timing/num_env_steps"] = (
+                        int(update_step) * int(config["num_steps"]) * int(config["num_train_envs"]) * int(NUM_GPUS)
+                    )
+                    to_log["timing/sps"] = (
+                        int(config["num_steps"]) * int(config["num_train_envs"]) * int(NUM_GPUS)
+                    ) / delta_time
                     to_log["timing/sps_agg"] = (to_log["timing/num_env_steps"]) / (time_now - time_start)
-                    (
-                        obs_vid,
-                        should_log_videos,
-                        should_log_eval,
-                        idx_vid,
-                        eval_return_vid,
-                        eval_return_mean,
-                        eval_eplen_mean,
-                        eval_solverate_mean,
-                    ) = to_log_videos
 
-                    if should_log_eval:
-                        to_log["eval/mean_eval_return"] = eval_return_mean.mean()
-                        to_log["eval/mean_eval_eplen"] = eval_eplen_mean.mean()
-                        to_log["eval/mean_eval_solve"] = eval_solverate_mean.mean()
-                        for i, eval_name in enumerate(config["eval_levels"]):
-                            return_on_video = eval_return_vid[i]
-                            to_log[f"eval_video/return_{eval_name}"] = return_on_video
-                            to_log[f"eval_video/len_{eval_name}"] = idx_vid[i]
-                            to_log[f"eval_avg/return_{eval_name}"] = eval_return_mean[i]
-                            to_log[f"eval_avg/solve_rate_{eval_name}"] = eval_solverate_mean[i]
-
-                    if should_log_videos:
-                        for i, eval_name in enumerate(config["eval_levels"]):
-                            obs_to_use = obs_vid[: idx_vid[i], i]
-                            obs_to_use = np.asarray(obs_to_use).transpose(0, 3, 2, 1)[:, :, ::-1, :]
-                            to_log[f"media/eval_video_{eval_name}"] = wandb.Video(
-                                (obs_to_use * 255).astype(np.uint8), fps=15
-                            )
-
+                    if metrics_to_log["device_id"] != 0:
+                        return
+                    to_log |= create_eval_metrics_dict_for_logging(
+                        all_eval_specs,
+                        all_eval_metrics if should_log_evals else None,
+                        all_video_metrics if should_log_videos else None,
+                    )
                     wandb.log(to_log)
 
-                jax.debug.callback(callback, metric, traj_batch.info, loss_info, update_step, to_log_videos)
+                metrics_to_log = jax.lax.pmean(metrics_to_log, axis_name="devices")
+                metrics_to_log["device_id"] = jax.lax.axis_index("devices")
+                metrics_to_log |= param_metrics
+                jax.debug.callback(
+                    callback, traj_batch.info, update_step, *all_eval_metrics, *all_video_metrics, metrics_to_log
+                )
 
-            runner_state = (
+            runner_state = RunnerState(
                 train_state,
                 env_state,
                 last_obs,
                 last_done,
+                extra,
                 hstate,
-                rng,
+                jnp.expand_dims(rng, axis=0),
                 update_step + 1,
             )
             return runner_state, metric
 
-        rng, _rng = jax.random.split(rng)
-        runner_state = (
-            train_state,
-            env_state,
-            obsv,
-            jnp.zeros((config["num_train_envs"]), dtype=bool),
-            init_hstate,
-            _rng,
-            0,
+        runner_state_spec = RunnerState(
+            train_state=PartitionSpec(),  # replicated
+            env_state=PartitionSpec("devices"),
+            last_obs=PartitionSpec("devices"),
+            last_done=PartitionSpec("devices"),
+            extra=PartitionSpec(),  # rms norm: replicated
+            hstate=PartitionSpec("devices"),
+            rng=PartitionSpec("devices"),
+            update_step=PartitionSpec(),  # replicated
         )
-        runner_state, metric = jax.lax.scan(_update_step, runner_state, None, config["num_updates"])
+
+        _update_step_shard_mapped = jax.jit(
+            jax.shard_map(
+                _update_step,
+                mesh=mesh,
+                in_specs=(
+                    runner_state_spec,
+                    PartitionSpec(),
+                ),
+                out_specs=(runner_state_spec, PartitionSpec()),
+                check_vma=False,
+            )
+        )
+
+        rng, _rng = jax.random.split(rng)
+        # put on appropriate devices
+        sharded_rng = jax.random.split(_rng, NUM_GPUS)
+        replicated_train_state = jax.device_put(train_state, replicated_sharding)
+        replicated_extra = jax.device_put(initial_extra, replicated_sharding)
+        replicated_update_step = jax.device_put(jnp.array(0), replicated_sharding)
+        # and run
+        runner_state = RunnerState(
+            train_state=replicated_train_state,
+            env_state=env_state,
+            last_obs=obsv,
+            last_done=init_dones,
+            extra=replicated_extra,
+            hstate=init_hstate,
+            rng=sharded_rng,
+            update_step=replicated_update_step,
+        )
+
+        if return_update_step_and_init_state:
+            return _update_step_shard_mapped, runner_state
+
+        how_many_checkpoints_do_we_save = math.ceil(config["num_updates"] / config["checkpoint_save_freq"])
+        if jax.process_index() == 0:
+            logger.info(
+                f"Saving {how_many_checkpoints_do_we_save} checkpoints, frequency={config['checkpoint_save_freq']}, total updates={config['num_updates']}"
+            )
+
+        def _single_checkpoint_step(runner_state, checkpoint_no):
+            runner_state, metric = jax.lax.scan(
+                _update_step_shard_mapped, runner_state, None, config["checkpoint_save_freq"]
+            )
+
+            def _callback(checkpoint_no, train_state, extra):
+                if config["save_policy"] and jax.process_index() == 0:
+                    update_number = int(checkpoint_no) * config["checkpoint_save_freq"]
+                    timesteps_here = (
+                        (int(update_number) + int(config["checkpoint_save_freq"]))
+                        * int(config["num_steps"])
+                        * int(config["num_train_envs"])
+                        * int(NUM_GPUS)
+                    )
+                    logger.info(
+                        f"Saving checkpoint at update = {update_number} | env steps = {timesteps_here/1e9:.2f}B"
+                    )
+                    save_model(
+                        train_state,
+                        timesteps_here,
+                        config,
+                        save_to_wandb=config["use_wandb"],
+                        extra=extra,
+                    )
+
+            jax.debug.callback(_callback, checkpoint_no, runner_state.train_state, runner_state.extra)
+            return runner_state, metric
+
+        runner_state, metric = jax.lax.scan(
+            _single_checkpoint_step, runner_state, jnp.arange(how_many_checkpoints_do_we_save)
+        )
+
         return {"runner_state": runner_state, "metric": metric}
 
     return train
@@ -462,28 +692,29 @@ def make_train(config, env_params, static_env_params):
 
 @hydra.main(version_base=None, config_path="../configs", config_name="ppo")
 def main(config):
-    config = normalise_config(OmegaConf.to_container(config), "PPO")
+    process_id = jax.process_index()
+
+    name = "PPO"
+    if jax.process_count() > 1:
+        name += "-" + f"{jax.device_count()}-GPUs"
+    config = normalise_config(OmegaConf.to_container(config), name)
     env_params, static_env_params = generate_params_from_config(config)
     config["env_params"] = to_state_dict(env_params)
     config["static_env_params"] = to_state_dict(static_env_params)
 
-    if config["num_minibatches"] > config["num_train_envs"]:
-        raise ValueError(
-            f"num_minibatches ({config['num_minibatches']}) must be less than or equal to num_train_envs ({config['num_train_envs']})"
-        )
-
     if config["use_wandb"]:
-        run = init_wandb(config, "PPO")
+        if process_id == 0:
+            init_wandb(config, name, settings=wandb.Settings(quiet=True))
+        else:
+            os.environ["WANDB_MODE"] = "disabled"
 
     rng = jax.random.PRNGKey(config["seed"])
     rng, _rng = jax.random.split(rng)
-    train_jit = jax.jit(make_train(config, env_params, static_env_params))
-
-    out = train_jit(_rng)
-
-    if config["save_policy"]:
-        train_state = jax.tree.map(lambda x: x, out["runner_state"][0])
-        save_model(train_state, config["total_timesteps"], config, save_to_wandb=config["use_wandb"])
+    t = time.time()
+    train = jax.jit(make_train(config, env_params, static_env_params)).lower(_rng).compile()
+    if jax.process_index() == 0:
+        logger.info(f"Took {time.time() - t:.2f}s to compile")
+    train(_rng)
 
 
 if __name__ == "__main__":

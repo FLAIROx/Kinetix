@@ -1,5 +1,4 @@
 from functools import partial
-from typing import Optional, Union
 
 import chex
 import jax
@@ -179,3 +178,55 @@ def permute_state(rng: chex.PRNGKey, env_state: EnvState, static_env_params: Sta
     # and collision matrix
     env_state = env_state.replace(collision_matrix=calculate_collision_matrix(static_env_params, env_state.joint))
     return env_state
+
+
+def static_env_params_from_size(size: str, return_dict: bool = False):
+    assert size in ["s", "m", "l"]
+
+    config = {
+        "s": {
+            "num_polygons": 5,
+            "num_circles": 2,
+            "num_joints": 1,
+            "num_thrusters": 1,
+            "env_size_name": "s",
+            "num_motor_bindings": 4,
+            "num_thruster_bindings": 2,
+            "frame_skip": 2,
+        },
+        "m": {
+            "num_polygons": 6,
+            "num_circles": 3,
+            "num_joints": 2,
+            "num_thrusters": 2,
+            "env_size_name": "m",
+            "num_motor_bindings": 4,
+            "num_thruster_bindings": 2,
+            "frame_skip": 2,
+        },
+        "l": {
+            "num_polygons": 12,
+            "num_circles": 4,
+            "num_joints": 6,
+            "num_thrusters": 2,
+            "env_size_name": "l",
+            "num_motor_bindings": 4,
+            "num_thruster_bindings": 2,
+            "frame_skip": 2,
+        },
+    }[size]
+
+    static_env_params = StaticEnvParams().replace(
+        num_polygons=config["num_polygons"],
+        num_circles=config["num_circles"],
+        num_joints=config["num_joints"],
+        num_thrusters=config["num_thrusters"],
+        frame_skip=config["frame_skip"],
+        num_motor_bindings=config["num_motor_bindings"],
+        num_thruster_bindings=config["num_thruster_bindings"],
+        downscale=4,
+    )
+    if return_dict:
+        del config["env_size_name"]
+        return static_env_params, config
+    return static_env_params

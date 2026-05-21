@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinetix-env"
-version = "2.0.5"
+version = "3.0.0"
 authors = [
   { name="Michael Matthews", email="michael.matthews@eng.ox.ac.uk" },
   { name="Michael Beukman", email="michael.beukman@eng.ox.ac.uk" },
@@ -38,6 +38,9 @@ dependencies = [
     "jaxgl",
     "jax2d==1.0.1",
     "moviepy==1.0.3",
+    "zarr==2.18.3",
+    "numcodecs==0.13.1",
+    "grain"
 ]
 
 [project.optional-dependencies]

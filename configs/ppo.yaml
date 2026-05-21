@@ -1,11 +1,11 @@
 defaults:
   - env: entity
-  - env_size: s
+  - env_size: m
   - learning:
     - ppo-base
     - ppo-rnn
   - misc: misc
-  - eval: s
+  - eval: m
   - train_levels: random
   - model:
     - model-base
@@ -17,6 +17,8 @@ defaults:
 eval:
   eval_freq: 64
 misc:
-  video_frequency: 2
+  video_frequency: 10
+  save_path: null  
+
 
 seed: 0

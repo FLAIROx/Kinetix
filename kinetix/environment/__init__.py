@@ -1,4 +1,4 @@
-from kinetix.environment.env import make_kinetix_env
+from kinetix.environment.env import make_kinetix_env, KinetixEnv
 
 from kinetix.environment.wrappers import LogWrapper
 from kinetix.environment.env_state import EnvState, EnvParams, StaticEnvParams
@@ -13,7 +13,7 @@ from kinetix.environment.ued.ued import (
 )
 
 from kinetix.environment.ued.distributions import sample_kinetix_level
-from kinetix.environment.utils import permute_state, create_empty_env
+from kinetix.environment.utils import permute_state, create_empty_env, static_env_params_from_size
 
 
 from kinetix.environment.spaces import (
@@ -21,10 +21,12 @@ from kinetix.environment.spaces import (
     ObservationType,
     PixelObservations,
     SymbolicObservations,
+    EntityObservations,
     SymbolicPaddedObservations,
     KinetixObservation,
     KinetixAction,
     ContinuousActions,
     DiscreteActions,
+    MultiDiscrete,
     MultiDiscreteActions,
 )

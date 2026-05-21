@@ -1,3 +1,4 @@
 custom_path: l/grasp_easy.json
 env_size_type: custom
 env_size_name: custom
+frame_skip: 2

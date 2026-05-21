@@ -14,10 +14,10 @@ from omegaconf import OmegaConf
 
 import wandb
 from kinetix.environment.env_state import EnvParams, StaticEnvParams
-from kinetix.environment.spaces import ActionType
-from kinetix.environment.spaces import ObservationType
 from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.util.saving import get_correct_path_of_json_level, load_from_json_file
+from kinetix.environment.spaces import ActionType, ObservationType
+from kinetix.environment.utils import static_env_params_from_size
+from kinetix.util.saving import load_from_json_file
 
 
 def get_hash_without_seed(config):
@@ -33,6 +33,7 @@ def get_date() -> str:
 
 
 def generate_params_from_config(config):
+    downscale = config.get("downscale", 4)
     if config.get("env_size_type", "predefined") == "custom":
         # must load env params from a file
         _, static_env_params, env_params = load_from_json_file(config["custom_path"])
@@ -49,6 +50,7 @@ def generate_params_from_config(config):
         frame_skip=config["frame_skip"],
         num_motor_bindings=config["num_motor_bindings"],
         num_thruster_bindings=config["num_thruster_bindings"],
+        downscale=downscale,
     )
 
     return env_params, static_env_params
@@ -82,7 +84,7 @@ def get_eval_level_groups(eval_levels: List[str]) -> List[Tuple[str, str]]:
 
 def normalise_config(config, name, editor_config=False, save_config: bool = True):
     old_config = copy.deepcopy(config)
-    keys = ["env", "learning", "model", "misc", "eval", "ued", "env_size", "train_levels"]
+    keys = ["env", "learning", "model", "misc", "eval", "ued", "env_size", "train_levels", "bc"]
     for k in keys:
         if k not in config:
             config[k] = {}
@@ -96,6 +98,8 @@ def normalise_config(config, name, editor_config=False, save_config: bool = True
     config["observation_type"] = ObservationType.from_string(config["observation_type"])
     config["action_type_str"] = config["action_type"]
     config["action_type"] = ActionType.from_string(config["action_type"])
+    if "save_path" in config and config["save_path"] == "None":
+        config["save_path"] = None
     if not editor_config:
         config[
             "env_name"
@@ -129,6 +133,7 @@ def normalise_config(config, name, editor_config=False, save_config: bool = True
             * (2 if name == "PAIRED" else 1)
         )
         config["num_updates"] = int(config["total_timesteps"]) // steps
+        config["num_updates"] = min(config["num_updates"], 1024000000)
 
         nsteps = int(config["total_timesteps"] // 1e6)
         letter = "M"
@@ -136,11 +141,31 @@ def normalise_config(config, name, editor_config=False, save_config: bool = True
             nsteps = nsteps // 1000
             letter = "B"
         config["run_name"] = (
-            config["env_name"] + f"-{name}-" + str(nsteps) + letter + "-" + str(config["num_train_envs"])
+            config["env_name"]
+            + f"-{name}-"
+            + str(nsteps)
+            + letter
+            + "-"
+            + str(config["num_train_envs"])
+            + config["extra_run_name"]
         )
 
         if config["checkpoint_save_freq"] >= config["num_updates"]:
             config["checkpoint_save_freq"] = config["num_updates"]
+
+        if "override_model_depth" in config and config["override_model_depth"] > 0:
+            config["actor_depth"] = config["override_model_depth"]
+            config["critic_depth"] = config["override_model_depth"]
+        if "override_model_width" in config and config["override_model_width"] > 0:
+            config["actor_width"] = config["override_model_width"]
+            config["critic_width"] = config["override_model_width"]
+
+        if config.get("env_size_type", "predefined") == "predefined":
+            _, updated_config = static_env_params_from_size(config["env_size_name"], return_dict=True)
+            for k, v in updated_config.items():
+                assert k not in config, f"Key {k} found in config"
+                config[k] = v
+
     return config
 
 
@@ -155,7 +180,9 @@ def get_tags(config, name):
     return tags
 
 
-def init_wandb(config, name) -> wandb.run:
+def init_wandb(config, name, **kwargs) -> wandb.run:
+    if "settings" not in kwargs:
+        kwargs["settings"] = wandb.Settings(init_timeout=600, start_method="thread")
     run = wandb.init(
         config=config,
         project=config["wandb_project"],
@@ -164,6 +191,7 @@ def init_wandb(config, name) -> wandb.run:
         entity=config["wandb_entity"],
         mode=config["wandb_mode"],
         tags=get_tags(config, name),
+        **kwargs,
     )
     wandb.define_metric("timing/num_updates")
     wandb.define_metric("timing/num_env_steps")
@@ -213,7 +241,7 @@ def get_video_frequency(config, update_step):
         config["eval_freq"]
         * config["video_frequency"]
         * jax.lax.select(
-            (0.1 <= frac_through_training) & (frac_through_training < 0.3),
+            (0.0 <= frac_through_training) & (frac_through_training < 0.3),
             1,
             jax.lax.select(
                 (0.3 <= frac_through_training) & (frac_through_training < 0.6),

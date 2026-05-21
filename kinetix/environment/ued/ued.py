@@ -8,8 +8,10 @@ import jax.numpy as jnp
 from jax2d.engine import PhysicsEngine
 
 from kinetix.environment.env_state import EnvParams, EnvState, StaticEnvParams
-from kinetix.environment.ued.distributions import create_vmapped_filtered_distribution, sample_kinetix_level
-from kinetix.environment.ued.locomotion_distribution import make_reset_fn_custom_distribution
+from kinetix.environment.ued.distributions import (
+    create_vmapped_filtered_distribution,
+    sample_kinetix_level,
+)
 from kinetix.environment.ued.mutators import (
     make_mutate_change_shape_rotation,
     make_mutate_change_shape_size,
@@ -25,9 +27,10 @@ from kinetix.environment.ued.mutators import (
     mutate_swap_role,
     mutate_toggle_fixture,
 )
+from kinetix.environment.ued.locomotion_distribution import make_reset_fn_custom_distribution
 from kinetix.environment.ued.ued_state import UEDParams
-from kinetix.environment.utils import create_empty_env
-from kinetix.util.saving import load_evaluation_levels
+from kinetix.environment.utils import create_empty_env, static_env_params_from_size
+from kinetix.util.saving import expand_env_state, load_evaluation_levels
 
 
 def make_mutate_env(static_env_params: StaticEnvParams, env_params: EnvParams, ued_params: UEDParams):
@@ -114,6 +117,35 @@ def make_reset_fn_sample_kinetix_level(
     return reset
 
 
+def make_reset_fn_sample_kinetix_level_different_static_env_params(
+    env_params: EnvParams,
+    static_env_params: StaticEnvParams,
+    different_static_env_params: list[StaticEnvParams],
+    ued_params: UEDParams,
+):
+    def make_generate_and_expand(reset_fn):
+        def _generate(rng):
+            level = reset_fn(rng)
+            return expand_env_state(level, static_env_params)
+
+        return _generate
+
+    reset_fns = [
+        make_generate_and_expand(make_reset_fn_sample_kinetix_level(env_params, inner_statics, ued_params, None))
+        for inner_statics in different_static_env_params
+    ]
+
+    def reset(rng):
+        rng, _rng = jax.random.split(rng)
+        return jax.lax.switch(
+            jax.random.randint(_rng, (), 0, len(different_static_env_params)),
+            reset_fns,
+            rng,
+        )
+
+    return reset
+
+
 def make_reset_fn_sample_empty_level(env_params: EnvParams, static_env_params: StaticEnvParams):
     def reset(rng):
         return create_empty_env(static_env_params)
@@ -122,13 +154,19 @@ def make_reset_fn_sample_empty_level(env_params: EnvParams, static_env_params: S
 
 
 def make_vmapped_filtered_level_sampler(
-    level_sampler, env_params: EnvParams, static_env_params: StaticEnvParams, config, env, ued_params: UEDParams = None
+    level_sampler,
+    env_params: EnvParams,
+    static_env_params: StaticEnvParams,
+    config,
+    env,
+    ued_params: UEDParams = None,
+    return_rngs: bool = False,
 ):
     ued_params = ued_params or UEDParams()
 
     @partial(jax.jit, static_argnums=(1,))
     def reset(rng, n_samples):
-        inner = create_vmapped_filtered_distribution(
+        levels, rngs = create_vmapped_filtered_distribution(
             rng,
             level_sampler,
             env_params,
@@ -141,7 +179,9 @@ def make_vmapped_filtered_level_sampler(
             config["env_size_name"],
             config["level_filter_n_steps"],
         )
-        return inner
+        if return_rngs:
+            return levels, rngs
+        return levels
 
     return reset
 
@@ -182,11 +222,18 @@ def make_reset_fn_from_config(
 ):
     if config["train_level_mode"] == "list":
         reset_fn = make_reset_fn_list_of_levels(config["train_levels_list"], static_env_params)
-    elif config["train_level_mode"] == "random":
-        reset_fn = make_reset_fn_sample_kinetix_level(env_params, static_env_params, ued_params, physics_engine)
     elif config["train_level_mode"] == "locomotion":
         reset_fn = make_reset_fn_custom_distribution(
             config["train_level_mode"], env_params, static_env_params, fn_kwargs=dict(ued_params=ued_params)
+        )
+    elif config["train_level_mode"] == "random":
+        reset_fn = make_reset_fn_sample_kinetix_level(env_params, static_env_params, ued_params, physics_engine)
+    elif config["train_level_mode"] == "random_all":
+        reset_fn = make_reset_fn_sample_kinetix_level_different_static_env_params(
+            env_params,
+            static_env_params,
+            [static_env_params_from_size(size) for size in ["s", "m", "l"]],
+            ued_params,
         )
     elif config["train_level_mode"] == "dummy":
         reset_fn = make_reset_fn_sample_empty_level(env_params, static_env_params)

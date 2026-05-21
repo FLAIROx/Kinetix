@@ -60,9 +60,9 @@ def create_vmapped_filtered_distribution(
 
         # Wrap levels
         rng, _rng = jax.random.split(rng)
-        _rngs = jax.random.split(_rng, n_unfiltered_samples)
+        level_rngs = jax.random.split(_rng, n_unfiltered_samples)
         obsv, unfiltered_levels_wrapped = jax.vmap(env.reset, in_axes=(0, None, 0))(
-            _rngs, env_params, unfiltered_levels
+            level_rngs, env_params, unfiltered_levels
         )
 
         rng, _rng = jax.random.split(rng)
@@ -82,14 +82,15 @@ def create_vmapped_filtered_distribution(
         )
 
         levels = jax.tree.map(lambda x: x[level_indexes], unfiltered_levels)
+        level_rngs = level_rngs[level_indexes]
 
     else:
         rng, _rng = jax.random.split(rng)
-        _rngs = jax.random.split(_rng, n_samples)
+        level_rngs = jax.random.split(_rng, n_samples)
 
-        levels = jax.vmap(level_sampler, in_axes=(0,))(_rngs)
+        levels = jax.vmap(level_sampler, in_axes=(0,))(level_rngs)
 
-    return levels
+    return levels, level_rngs
 
 
 @partial(jax.jit, static_argnums=(1, 3, 4))

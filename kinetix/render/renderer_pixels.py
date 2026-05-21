@@ -1,3 +1,4 @@
+import math
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -22,6 +23,8 @@ def make_render_pixels(env_params, static_params: StaticEnvParams):
 
     joint_tex_size = 6
     thruster_tex_size = 16
+
+    joint_pixel_size_multiplier = 1
 
     edge_thickness = 2
     use_textures_for_joints = True
@@ -132,7 +135,7 @@ def make_render_pixels(env_params, static_params: StaticEnvParams):
 
         return tex_frag
 
-    thruster_pixel_size = thruster_tex_size // downscale
+    thruster_pixel_size = math.ceil((thruster_tex_size // downscale) * env_params.pixels_per_unit / 100)
     thruster_pixel_size_diagonal = (thruster_pixel_size * np.sqrt(2)).astype(jnp.int32) + 1
 
     def fragment_shader_kinetix_thruster(fragment_position, current_frag, unit_position, uniform):
@@ -168,7 +171,9 @@ def make_render_pixels(env_params, static_params: StaticEnvParams):
     quad_renderer = make_renderer(full_screen_size, fragment_shader_quad_no_edges, patch_size, batched=True)
     big_quad_renderer = make_renderer(full_screen_size, fragment_shader_quad_no_edges, downscaled_screen_dim)
 
-    joint_pixel_size = joint_tex_size // downscale
+    joint_pixel_size = (
+        math.ceil((joint_tex_size // downscale) * env_params.pixels_per_unit / 100) * joint_pixel_size_multiplier
+    )
     joint_fragment_shader = (
         fragment_shader_kinetix_joint_texture if use_textures_for_joints else fragment_shader_kinetix_joint_circle
     )

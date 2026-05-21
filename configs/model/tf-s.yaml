@@ -1,0 +1,9 @@
+override_model_depth: 3
+override_model_width: 256
+transformer_depth: 2
+transformer_size: 32
+transformer_encoder_size: 128
+num_heads: 8
+transformer_ffn: True
+multilayer_joint_thruster_mixing: True
+model_name: tf-s-default-mix

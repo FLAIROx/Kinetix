@@ -30,6 +30,7 @@ def make_network_from_config(env, env_params, config, network_kws={}):
     assert obs_type in ObservationType and type(obs_type) != str
     if obs_type == ObservationType.PIXELS:
         cls_to_use = ActorCriticPixelsRNN
+        network_kws["cnn_mode"] = config["cnn_mode"]
     elif obs_type == ObservationType.SYMBOLIC_FLAT:
         cls_to_use = ActorCriticSymbolicRNN
 
@@ -38,8 +39,10 @@ def make_network_from_config(env, env_params, config, network_kws={}):
     ):
         network = ActorCriticPermutationInvariantSymbolicRNN(
             action_dim=action_dim,
-            fc_layer_width=config["fc_layer_width"],
-            fc_layer_depth=config["fc_layer_depth"],
+            actor_width=config["actor_width"],
+            critic_width=config["critic_width"],
+            actor_depth=config["actor_depth"],
+            critic_depth=config["critic_depth"],
             action_mode=action_mode,
             activation=config["activation"],
             permutation_invariant=True,
@@ -47,13 +50,16 @@ def make_network_from_config(env, env_params, config, network_kws={}):
             symbolic_embedding_dim=config["symbolic_embedding_dim"],
             preprocess_separately=config["permutation_invariant_mlp"],
             encoder_size=config["encoder_size"],
+            separate_actor_critic=config["separate_actor_critic"],
             **network_kws,
         )
     elif obs_type == ObservationType.SYMBOLIC_ENTITY:
-        network = ActorCriticTransformer(
+        kwargs = dict(
             action_dim=action_dim,
-            fc_layer_width=config["fc_layer_width"],
-            fc_layer_depth=config["fc_layer_depth"],
+            actor_width=config["actor_width"],
+            critic_width=config["critic_width"],
+            actor_depth=config["actor_depth"],
+            critic_depth=config["critic_depth"],
             action_mode=action_mode,
             num_heads=config["num_heads"],
             transformer_depth=config["transformer_depth"],
@@ -62,13 +68,26 @@ def make_network_from_config(env, env_params, config, network_kws={}):
             aggregate_mode=config["aggregate_mode"],
             full_attention_mask=config["full_attention_mask"],
             activation=config["activation"],
+            transformer_ffn=config["transformer_ffn"],
+            multilayer_joint_thruster_mixing=config["multilayer_joint_thruster_mixing"],
             **network_kws,
+        )
+        thruster_joint_kwargs = dict(
+            joint_thruster_block_num_layers=config["joint_thruster_block_num_layers"],
+            joint_thruster_block_hidden_dim_multiplication=config["joint_thruster_block_hidden_dim_multiplication"],
+        )
+        network = ActorCriticTransformer(
+            **kwargs,
+            **thruster_joint_kwargs,
+            dropout_prob=config["dropout_prob"],
         )
     else:
         network = cls_to_use(
             action_dim,
-            fc_layer_width=config["fc_layer_width"],
-            fc_layer_depth=config["fc_layer_depth"],
+            actor_width=config["actor_width"],
+            critic_width=config["critic_width"],
+            actor_depth=config["actor_depth"],
+            critic_depth=config["critic_depth"],
             activation=config["activation"],
             action_mode=action_mode,
             **network_kws,

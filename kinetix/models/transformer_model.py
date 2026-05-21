@@ -1,5 +1,6 @@
 from typing import List, Sequence
 
+import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -7,7 +8,13 @@ import numpy as np
 from flax.linen.attention import MultiHeadDotProductAttention
 from flax.linen.initializers import constant, orthogonal
 
-from kinetix.models.actor_critic import GeneralActorCriticRNN
+from kinetix.environment.spaces import ActionType
+from kinetix.models.action_spaces import (
+    HybridActionDistribution,
+    MultiDiscreteActionDistribution,
+    TemperatureCategorical,
+)
+from kinetix.models.actor_critic import DenseAndActivation, GeneralActorCriticRNN, ScannedRNN
 from kinetix.render.renderer_symbolic_entity import EntityObservation
 
 
@@ -33,8 +40,10 @@ class transformer_layer(nn.Module):
     num_heads: int
     out_features: int
     qkv_features: int
+    transformer_ffn: bool
     gating: bool = False
     gating_bias: float = 0.0
+    dropout_prob: float = 0.0
 
     def setup(self):
         self.attention1 = MultiHeadDotProductAttention(
@@ -42,17 +51,20 @@ class transformer_layer(nn.Module):
         )
 
         self.ln1 = nn.LayerNorm()
+        self.ln2 = nn.LayerNorm()
 
-        self.dense1 = nn.Dense(self.out_features)
-
+        self.dense1 = nn.Dense(self.out_features * 4 if self.transformer_ffn else self.out_features)
         self.dense2 = nn.Dense(self.out_features)
 
-        self.ln2 = nn.LayerNorm()
         if self.gating:
             self.gate1 = Gating(self.out_features, self.gating_bias)
             self.gate2 = Gating(self.out_features, self.gating_bias)
 
-    def __call__(self, queries: jnp.ndarray, mask: jnp.ndarray):
+        if self.dropout_prob > 0.0:
+            assert self.transformer_ffn
+            self.dropout_layer = nn.Dropout(self.dropout_prob)
+
+    def __call__(self, queries: jnp.ndarray, mask: jnp.ndarray, deterministic: bool = True):
         # After reading the paper, this is what I think we should do:
         # First layernorm, then do attention
         queries_n = self.ln1(queries)
@@ -62,7 +74,14 @@ class transformer_layer(nn.Module):
         else:
             y = queries + y
         # Dense after norming, crucially no relu.
-        e = self.dense1(self.ln2(y))
+        if self.transformer_ffn:
+            temp = jax.nn.relu(self.dense1(self.ln2(y)))
+            if self.dropout_prob > 0.0:
+                temp = self.dropout_layer(temp, deterministic=deterministic)
+            e = self.dense2(temp)
+        else:
+            e = self.dense1(self.ln2(y))
+
         if self.gating:  # and gate again
             # This may be the wrong way around
             e = self.gate2(y, jax.nn.relu(e))
@@ -72,13 +91,36 @@ class transformer_layer(nn.Module):
         return e
 
 
+class ThrusterAndJointBlock(nn.Module):
+    encoder_size: int
+    hidden_size: int
+    num_layers: int = 1
+    activate_final: bool = False
+
+    @nn.compact
+    def __call__(self, x):
+        for l in range(self.num_layers - 1):
+            x = nn.Dense(self.hidden_size)(x)
+            x = nn.relu(x)
+
+        x = nn.Dense(self.encoder_size)(x)
+        if self.activate_final:
+            x = nn.relu(x)
+        return x
+
+
 class Transformer(nn.Module):
     encoder_size: int
     num_heads: int
     qkv_features: int
     num_layers: int
+    transformer_ffn: bool
+    multilayer_joint_thruster_mixing: bool
+    joint_thruster_block_num_layers: int
+    joint_thruster_block_hidden_dim_multiplication: int
     gating: bool = False
     gating_bias: float = 0.0
+    dropout_prob: float = 0.0
 
     def setup(self):
         # self.encoder = nn.Dense(self.encoder_size)
@@ -92,12 +134,34 @@ class Transformer(nn.Module):
                 out_features=self.encoder_size,
                 gating=self.gating,
                 gating_bias=self.gating_bias,
+                transformer_ffn=self.transformer_ffn,
+                dropout_prob=self.dropout_prob,
             )
             for _ in range(self.num_layers)
         ]
 
-        self.joint_layers = [nn.Dense(self.encoder_size) for _ in range(self.num_layers)]
-        self.thruster_layers = [nn.Dense(self.encoder_size) for _ in range(self.num_layers)]
+        if self.multilayer_joint_thruster_mixing:
+            self.joint_layers = [
+                ThrusterAndJointBlock(
+                    encoder_size=self.encoder_size,
+                    hidden_size=self.encoder_size * self.joint_thruster_block_hidden_dim_multiplication,
+                    num_layers=self.joint_thruster_block_num_layers,
+                    activate_final=True,
+                )
+                for _ in range(self.num_layers)
+            ]
+            self.thruster_layers = [
+                ThrusterAndJointBlock(
+                    encoder_size=self.encoder_size,
+                    hidden_size=self.encoder_size * self.joint_thruster_block_hidden_dim_multiplication,
+                    num_layers=self.joint_thruster_block_num_layers,
+                    activate_final=True,
+                )
+                for _ in range(self.num_layers)
+            ]
+        else:
+            self.joint_layers = [nn.Dense(self.encoder_size) for _ in range(self.num_layers)]
+            self.thruster_layers = [nn.Dense(self.encoder_size) for _ in range(self.num_layers)]
 
         # self.pos_emb=PositionalEmbedding(self.encoder_size)
 
@@ -111,6 +175,7 @@ class Transformer(nn.Module):
         thruster_embeddings,
         thruster_mask,
         thruster_indexes,
+        deterministic: bool = True,
     ):
         # forward eval so obs is only one timestep
         # encoded = self.encoder(shape_embeddings)
@@ -118,7 +183,7 @@ class Transformer(nn.Module):
 
         for tf_layer, joint_layer, thruster_layer in zip(self.tf_layers, self.joint_layers, self.thruster_layers):
             # Do attention
-            shape_embeddings = tf_layer(shape_embeddings, shape_attention_mask)
+            shape_embeddings = tf_layer(shape_embeddings, shape_attention_mask, deterministic=deterministic)
 
             # Joints
             # T, B, 2J, (2SE + JE)
@@ -163,24 +228,31 @@ class Transformer(nn.Module):
 
 class ActorCriticTransformer(nn.Module):
     action_dim: Sequence[int]
-    fc_layer_width: int
+    actor_width: int
+    critic_width: int
     action_mode: str
     hybrid_action_continuous_dim: int
     multi_discrete_number_of_dims_per_distribution: List[int]
     transformer_size: int
     transformer_encoder_size: int
     transformer_depth: int
-    fc_layer_depth: int
+    actor_depth: int
+    critic_depth: int
     num_heads: int
     activation: str
     aggregate_mode: str  # "dummy" or "mean" or "dummy_and_mean"
     full_attention_mask: bool  # if true, only mask out inactives, and have everything attend to everything else
+    transformer_ffn: bool
+    multilayer_joint_thruster_mixing: bool
+    joint_thruster_block_num_layers: int
+    joint_thruster_block_hidden_dim_multiplication: int
     add_generator_embedding: bool = False
     generator_embedding_number_of_timesteps: int = 10
     recurrent: bool = True
+    dropout_prob: float = 0.0
 
     @nn.compact
-    def __call__(self, hidden, x):
+    def __call__(self, hidden, x, deterministic: bool = True):
         if self.activation == "relu":
             activation = nn.relu
         else:
@@ -261,13 +333,18 @@ class ActorCriticTransformer(nn.Module):
             overall_mask = jax.vmap(jax.vmap(mask_out_inactives))(shape_mask, overall_mask)
 
         # Now do attention on these
-        embedding = Transformer(
+        all_entities = Transformer(
             num_layers=self.transformer_depth,
             num_heads=self.num_heads,
             qkv_features=self.transformer_size,
             encoder_size=self.transformer_encoder_size,
+            transformer_ffn=self.transformer_ffn,
+            multilayer_joint_thruster_mixing=self.multilayer_joint_thruster_mixing,
+            joint_thruster_block_num_layers=self.joint_thruster_block_num_layers,
+            joint_thruster_block_hidden_dim_multiplication=self.joint_thruster_block_hidden_dim_multiplication,
             gating=True,
             gating_bias=0.0,
+            dropout_prob=self.dropout_prob,
         )(
             shape_encodings,
             jnp.repeat(overall_mask, repeats=self.num_heads // overall_mask.shape[2], axis=2),
@@ -277,21 +354,26 @@ class ActorCriticTransformer(nn.Module):
             thruster_encodings,
             obs.thruster_mask,
             thruster_indexes,
+            deterministic=deterministic,
         )  # add the extra dimension for the heads
 
         if self.aggregate_mode == "mean" or self.aggregate_mode == "dummy_and_mean":
-            embedding = jnp.mean(embedding, axis=2, where=shape_mask[..., None])
+            embedding = jnp.mean(all_entities, axis=2, where=shape_mask[..., None])
         else:
-            embedding = embedding[:, :, 0]  # Take the dummy entity as the embedding of the entire scene.
+            embedding = all_entities[:, :, 0]  # Take the dummy entity as the embedding of the entire scene.
 
-        return GeneralActorCriticRNN(
+        hidden, pi, value = GeneralActorCriticRNN(
             action_dim=self.action_dim,
-            fc_layer_depth=self.fc_layer_depth,
-            fc_layer_width=self.fc_layer_width,
+            actor_depth=self.actor_depth,
+            critic_depth=self.critic_depth,
+            actor_width=self.actor_width,
+            critic_width=self.critic_width,
             action_type=self.action_mode,
             hybrid_action_continuous_dim=self.hybrid_action_continuous_dim,
             multi_discrete_number_of_dims_per_distribution=self.multi_discrete_number_of_dims_per_distribution,
             add_generator_embedding=self.add_generator_embedding,
             generator_embedding_number_of_timesteps=self.generator_embedding_number_of_timesteps,
             recurrent=self.recurrent,
-        )(hidden, og_obs, embedding, dones, activation)
+        )(hidden, og_obs, dones, activation, embedding)
+
+        return hidden, pi, value

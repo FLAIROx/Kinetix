@@ -224,9 +224,18 @@ class BlindObservations(KinetixObservation):
 
 
 class EntityObservations(KinetixObservation):
-    def __init__(self, env_params: EnvParams, static_env_params: StaticEnvParams, ignore_mask: bool = False):
+    def __init__(
+        self,
+        env_params: EnvParams,
+        static_env_params: StaticEnvParams,
+        ignore_mask: bool = False,
+    ):
         super().__init__(env_params, static_env_params)
-        self.render_function = make_render_entities(env_params, static_env_params, ignore_attention_mask=ignore_mask)
+        self.render_function = make_render_entities(
+            env_params,
+            static_env_params,
+            ignore_attention_mask=ignore_mask,
+        )
 
     def get_obs(self, state: EnvState):
         return self.render_function(state)

@@ -5,8 +5,8 @@ defaults:
     - ppo-rnn
   - misc: misc
   - ued: sfl
-  - env_size: s
-  - eval: s
+  - env_size: m
+  - eval: m
   - train_levels: random
   - model: 
     - model-base
@@ -15,7 +15,7 @@ defaults:
   - _self_
 
 eval:
-  eval_freq: 128
+  eval_freq: 64
 learning:
   num_steps: 256
 seed: 0

@@ -1,0 +1,9 @@
+override_model_depth: 5
+override_model_width: 128
+transformer_depth: 2
+transformer_size: 16
+transformer_encoder_size: 128
+num_heads: 8
+transformer_ffn: False
+multilayer_joint_thruster_mixing: False
+model_name: tf-s-paper
