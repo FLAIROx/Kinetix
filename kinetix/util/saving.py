@@ -225,6 +225,41 @@ def load_params(filename: Union[str, os.PathLike]) -> Dict:
     return my_load_file(filename)
 
 
+PRETRAINED_PARAMS_FILE = "params.safetensors"
+PRETRAINED_CONFIG_FILE = "config.json"
+
+
+def save_pretrained_checkpoint(params: Dict, config: Dict, checkpoint_dir: Union[str, os.PathLike]) -> None:
+    """Saves network parameters and a config in the format read by `load_pretrained_checkpoint`.
+
+    Args:
+        params: The network parameters, i.e. the output of `network.init(...)`, of the form {"params": {...}}.
+        config: Must contain a "model" key with the config options the network was created with (these are passed to
+            `make_network_from_config`). Anything else (e.g. training details) is stored as is.
+    """
+    from flax.traverse_util import flatten_dict
+    from safetensors.flax import save_file
+
+    assert "model" in config, "The config must contain the model options under the key 'model'"
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    save_file(flatten_dict(params, sep="/"), os.path.join(checkpoint_dir, PRETRAINED_PARAMS_FILE))
+    with open(os.path.join(checkpoint_dir, PRETRAINED_CONFIG_FILE), "w") as f:
+        json.dump(config, f, indent=2)
+
+
+def load_pretrained_checkpoint(checkpoint_dir: Union[str, os.PathLike]) -> tuple[Dict, Dict]:
+    """Loads a pretrained checkpoint (e.g. one downloaded from Hugging Face).
+
+    Returns:
+        (params, config): `params` can be used directly with `network.apply`. `config["model"]` contains the model
+        options, which must be merged into your config before calling `make_network_from_config`.
+    """
+    params = unflatten_dict(load_file(os.path.join(checkpoint_dir, PRETRAINED_PARAMS_FILE)), sep="/")
+    with open(os.path.join(checkpoint_dir, PRETRAINED_CONFIG_FILE)) as f:
+        config = json.load(f)
+    return params, config
+
+
 def load_params_from_wandb_artifact_path(checkpoint_name):
     api = wandb.Api()
     name = api.artifact(checkpoint_name).download()

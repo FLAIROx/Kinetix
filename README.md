@@ -218,6 +218,39 @@ Or, on a custom set:
 python3 experiments/ppo.py eval=eval_auto train_levels=l env_size=l train_levels.train_levels_list='["s/h2_one_wheel_car","l/h11_obstacle_avoidance"]'
 ```
 
+# 🤖 Pretrained Agents
+
+We release two general agents, trained with [SFL](https://arxiv.org/abs/2408.15099) on randomly generated levels. Both use the transformer architecture from the paper ([`tf-paper`](configs/model/tf-paper.yaml), 786k parameters) and entity observations with multi-discrete actions.
+
+| Checkpoint | Description | Trained on | Parallel envs | Env steps | Hand-designed (S / M / L / all) | Random (S / M / L / all) |
+|---|---|---|---|---|---|---|
+| `sfl-paper` | The generalist agent from the Kinetix paper | random `l` levels | 2,048 | 18B | 0.42 / 0.32 / 0.11 / **0.22** | 0.33 / 0.24 / 0.16 / **0.24** |
+| `sfl-1m-envs` | The same architecture, trained at a much larger scale | random `m` levels | 1,048,576 | 376B | 0.70 / 0.43 / 0.18 / **0.33** | 0.56 / 0.36 / 0.22 / **0.38** |
+
+The numbers are average solve rates on the 74 hand-designed levels in [`configs/eval/eval_all.yaml`](configs/eval/eval_all.yaml) (20 attempts per level) and on 512 random levels per size (5 attempts per level), sampled as in SFL training (see `get_randomly_sampled_eval_levels`). "all" averages over all levels, so larger sizes, with more levels, count for more.
+
+The checkpoints are hosted on [Hugging Face](https://huggingface.co/mbeukman/Kinetix-Checkpoints):
+```bash
+hf download mbeukman/Kinetix-Checkpoints --local-dir ./checkpoints
+```
+Each checkpoint directory contains `params.safetensors` and a `config.json`, whose `model` entry holds the options the network must be created with:
+```python
+from kinetix.models import make_network_from_config
+from kinetix.util import load_pretrained_checkpoint
+
+params, pretrained_config = load_pretrained_checkpoint("./checkpoints/sfl-1m-envs")
+config |= pretrained_config["model"]  # your normalised config
+network = make_network_from_config(env, env_params, config)
+hstate, pi, value = network.apply(params, hstate, (obs, done))
+```
+See [`examples/example_pretrained.py`](examples/example_pretrained.py) for a complete example that evaluates a checkpoint on the hand-designed levels:
+```commandline
+python3 examples/example_pretrained.py --checkpoint_dir ./checkpoints/sfl-1m-envs --size m
+```
+
+> [!NOTE]
+> The `sfl-paper` checkpoint sets `legacy_entity_id: true`, which reproduces a quirk of the original training code. This is handled automatically when you use its `config.json`.
+
 # 🗃️ Offline Data & Behavioural Cloning
 
 Kinetix now includes data-loading utilities for training from pre-collected datasets of transitions or trajectories.

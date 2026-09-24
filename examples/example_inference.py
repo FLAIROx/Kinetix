@@ -71,7 +71,6 @@ def main(config):
         x = jax.tree.map(lambda x: x[None, ...], (obs, done))  # add the dummy time dimension for the RNN
         hstate, pi, _ = train_state.apply_fn(train_state.params, hstate, x)
         action = pi.sample(seed=_rng_action).squeeze(0)
-        action = env.action_type.noop_action()[None]
 
         next_obs, next_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None, 0))(
             jax.random.split(_rng_step, NUM_ENVS_IN_PARALLEL),

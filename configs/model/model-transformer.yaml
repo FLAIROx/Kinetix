@@ -11,3 +11,5 @@ multilayer_joint_thruster_mixing: False
 joint_thruster_block_num_layers: 2
 joint_thruster_block_hidden_dim_multiplication: 4
 dropout_prob: 0.0
+# Only for checkpoints from the original Kinetix paper, see ActorCriticTransformer.legacy_entity_id
+legacy_entity_id: False

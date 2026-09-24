@@ -250,6 +250,9 @@ class ActorCriticTransformer(nn.Module):
     generator_embedding_number_of_timesteps: int = 10
     recurrent: bool = True
     dropout_prob: float = 0.0
+    # The models in the original Kinetix paper were trained with an out-of-bounds entity-id write that JAX silently
+    # dropped, so every shape had an entity id of 0. Set this to True to run those checkpoints.
+    legacy_entity_id: bool = False
 
     @nn.compact
     def __call__(self, hidden, x, deterministic: bool = True):
@@ -282,7 +285,7 @@ class ActorCriticTransformer(nn.Module):
                 )(features)
             )
             if concat:
-                id_1h = jnp.zeros((*embedding.shape[:3], 1)).at[:, :, :, 0].set(entity_id)
+                id_1h = jnp.zeros((*embedding.shape[:3], 1)).at[:, :, :, 0].set(0 if self.legacy_entity_id else entity_id)
                 return jnp.concatenate([embedding, id_1h], axis=-1)
             else:
                 return embedding

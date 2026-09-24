@@ -32,5 +32,7 @@ from kinetix.util.saving import (
     save_pickle,
     load_evaluation_levels,
     expand_env_state,
+    load_pretrained_checkpoint,
+    save_pretrained_checkpoint,
 )
 from kinetix.util.timing import time_function
