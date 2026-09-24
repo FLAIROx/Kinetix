@@ -263,7 +263,7 @@ class KinetixEnv(Environment):
             (
                 hash(self.static_env_params),
                 self.action_type.__class__.__name__,
-                self.observation_type.__class__.__name__,
+                self.observation_type.hash_key(),
                 self.reset_function,
                 self.auto_reset,
             )
@@ -298,7 +298,7 @@ class KinetixDummyEnv(KinetixEnv):
             (
                 hash(self.static_env_params),
                 self.action_type.__class__.__name__,
-                self.observation_type.__class__.__name__,
+                self.observation_type.hash_key(),
                 self.reset_function,
                 self.auto_reset,
                 "dummy",
