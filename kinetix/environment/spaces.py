@@ -201,6 +201,11 @@ class KinetixObservation(ABC):
     def observation_space(self, env_params: EnvParams):
         raise NotImplementedError()
 
+    def hash_key(self):
+        # Used by KinetixEnv.__hash__, so it must include every option that changes the observation;
+        # otherwise jitted env methods (where the env is static) reuse a trace from a differently-configured env.
+        return self.__class__.__name__
+
 
 class SymbolicPaddedObservations(KinetixObservation):
     def __init__(
@@ -231,6 +236,7 @@ class EntityObservations(KinetixObservation):
         ignore_mask: bool = False,
     ):
         super().__init__(env_params, static_env_params)
+        self.ignore_mask = ignore_mask
         self.render_function = make_render_entities(
             env_params,
             static_env_params,
@@ -239,6 +245,9 @@ class EntityObservations(KinetixObservation):
 
     def get_obs(self, state: EnvState):
         return self.render_function(state)
+
+    def hash_key(self):
+        return (self.__class__.__name__, self.ignore_mask)
 
     def observation_space(self, env_params: EnvParams) -> spaces.Dict:
         n_shapes = self.static_env_params.num_polygons + self.static_env_params.num_circles
