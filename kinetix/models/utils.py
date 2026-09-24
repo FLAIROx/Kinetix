@@ -80,6 +80,7 @@ def make_network_from_config(env, env_params, config, network_kws={}):
             **kwargs,
             **thruster_joint_kwargs,
             dropout_prob=config["dropout_prob"],
+            legacy_entity_id=config.get("legacy_entity_id", False),
         )
     else:
         network = cls_to_use(
